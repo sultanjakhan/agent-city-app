@@ -139,7 +139,7 @@ $('save-skill').addEventListener('click',async()=>{
 });
 $('load-skill-version').addEventListener('click',async()=>{
  if(!skillCurrent||skillSaving||!$('skill-history').value)return;setSkillBusy(true);
- try{const draft=await request('/api/skills?slug='+encodeURIComponent(skillCurrent.slug)+'&revision='+encodeURIComponent($('skill-history').value));$('skill-content').value=draft.content;invalidateSkillPreview();$('skill-message').textContent=t('Версия загружена в черновик. Проверь изменения перед сохранением.');}
+ try{const draft=await request('/api/skills?slug='+encodeURIComponent(skillCurrent.slug)+'&revision='+encodeURIComponent($('skill-history').value));window.agentCityDrafts?.remember($('skill-content'));$('skill-content').value=draft.content;invalidateSkillPreview();$('skill-message').textContent=t('Версия загружена в черновик. Проверь изменения перед сохранением.');}
  catch(e){$('skill-message').textContent=t(e.message);}finally{setSkillBusy(false);}
 });
 window.addEventListener('beforeunload',e=>{if($('skill-dialog').open&&skillCurrent&&$('skill-content').value!==skillCurrent.content){e.preventDefault();e.returnValue='';}});

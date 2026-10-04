@@ -1,9 +1,10 @@
 'use strict';
 // Existing dashboard and native task identities; pending edits never become confirmed tasks.
-let sharedState=null,sharedLoading=false,sharedBusy=false;
+let sharedState=null,sharedLoading=false,sharedBusy=false,sharedReadFailed=false;
 const sharedText={task_connection_unavailable:'Приложение или канал недоступны. Проверь адрес и запусти фоновый канал.',task_authentication_missing:'В процессе приложения нет указанного секрета. Настрой переменную окружения и перезапусти фоновый сервис.',task_authentication_rejected:'Секрет не принят. Проверь учётные данные сервиса.',task_scope_denied:'Недостаточно прав для этой команды. Проверь области доступа и список ID.',task_namespace_changed:'Подключён другой источник. Верни прежний профиль или создай отдельный профиль данных.',task_source_change_requires_separate_profile:'Есть сохранённые задачи или черновики. Для другого источника используй отдельный профиль данных.',revision_conflict:'Задача изменена в другом приложении. Сравни версии и отправь новый черновик.',task_settings_conflict:'Настройки изменились. Обнови страницу и повтори.',human_timer_active:'Сначала останови свой таймер в Cicada.',review_controls_status:'Для результата используй принятие или доработку.',task_exchange_failed:'Обмен не завершён. Проверь настройки и повтори; черновики сохранены.'};
+Object.assign(sharedText,{task_version_conflict:'Задача изменена в другом приложении. Сравни версии и отправь новый черновик.',execution_run_mismatch:'Эту доработку подтвердил другой запуск. Его работа не изменена; твой черновик сохранён.',operation_capacity:'Журнал операций Cicada заполнен. Обнови Cicada и повтори сохранённую отправку.',invalid_shared_text:'Текст слишком длинный или содержит неподдерживаемые символы. Исправь текст; прежняя отправка сохранена.'});
 function sharedError(code){return sharedText[code]||`Обмен не выполнен (${code||'нет данных'}). Проверь настройки подключения.`;}
-function isSharedTask(key){return Object.values(sharedState?.tasks||{}).some(t=>t.binding.taskKey===key);}
+function isSharedTask(key,sourceId=null,sourceNamespace=null){return Object.values(sharedState?.tasks||{}).some(t=>t.binding.taskKey===key||sourceId&&sourceNamespace&&t.binding.sourceId===sourceId&&t.binding.sourceNamespace===sourceNamespace);}
 function sharedRun(task){return [...task.reports].sort((a,b)=>(Date.parse(b.receivedAt)||0)-(Date.parse(a.receivedAt)||0)||(b.receivedOrder||0)-(a.receivedOrder||0))[0]||null;}
 function sharedReport(run){return run?.report?{...run,...run.report}:run;}
 function sharedRunFresh(run){const elapsed=Date.now()-Date.parse(run?.receivedAt);return elapsed>=0&&elapsed<=(sharedState?.config.staleAfterSeconds||300)*1000;}
@@ -17,15 +18,24 @@ function sharedExecution(task){
 }
 async function loadSharedTasks(){
  if(sharedLoading)return;sharedLoading=true;
- try{sharedState=await request('/api/task-sync');if(dashboardData)renderDashboardRows();}
- catch(e){if(view==='dashboard')toast(sharedError(e.message));}
+ try{sharedState=await request('/api/task-sync');sharedReadFailed=false;if(dashboardData)renderDashboardRows();}
+ catch(e){sharedReadFailed=true;renderTaskExchangeStatus();}
  finally{sharedLoading=false;}
 }
 function sharedButton(label,action,disabled=false){const b=el('button','secondary',label,true);b.type='button';b.disabled=disabled;b.addEventListener('click',action);return b;}
-function sharedField(parent,label,value='',multiline=false){const l=el('label','',label,true),i=document.createElement(multiline?'textarea':'input');i.value=value;i.maxLength=multiline?8000:4096;l.append(i);parent.append(l);return i;}
+function openTaskConnection(){selectSettingsTab('connectors');setView('settings');}
+function renderTaskExchangeStatus(){
+ const root=$('task-exchange-status');if(!root)return;root.replaceChildren();
+ const value=sharedState,c=value?.config;
+ let message=sharedReadFailed?'Состояние обмена недоступно':!value?'Проверяем подключение…':!c.enabled?'Только просмотр · двусторонний обмен выключен':value.failure?sharedError(value.failure.code):!value.lastSuccess?'Обмен ещё не подтверждён':`Обмен: ${when(value.lastSuccess)} · ${c.transport==='pipe'?'локальный канал':'API'}`;
+ if(c?.enabled&&value.lastSuccess&&!value.failure&&Date.now()-Date.parse(value.lastSuccess)>c.staleAfterSeconds*1000)message+=' · данные могут устареть';
+ root.append(el('span','',message,true));
+ const button=sharedButton(c?.enabled?'Настройки обмена':'Подключить обмен',openTaskConnection);button.className='text-button';root.append(button);
+}
+function sharedField(parent,label,value='',multiline=false){const l=el('label','',label,true),i=document.createElement(multiline?'textarea':'input');i.value=value;i.maxLength=multiline?8000:4096;const field={'Название':'title','Описание':'content','Этап (ID)':'stage','Процесс (ID)':'process','Комментарий / отзыв':'comment'}[label];if(field)i.dataset.draftField=field;l.append(i);parent.append(l);return i;}
 async function sharedAction(fn){if(sharedBusy)return;sharedBusy=true;try{await fn();}catch(e){toast(sharedError(e.message));}finally{sharedBusy=false;await loadSharedTasks();}}
 function appendSharedTaskRows(){
- const list=$('dashboard-tasks');if(!sharedState)return;
+ renderTaskExchangeStatus();const list=$('dashboard-tasks');if(!sharedState)return;
  let toolbar=$('shared-task-toolbar');if(!toolbar){toolbar=el('div','connection-actions');toolbar.id='shared-task-toolbar';list.before(toolbar);}
  toolbar.replaceChildren();
  if(sharedState.config.enabled)toolbar.append(sharedButton('Добавить общую задачу',()=>openSharedTask(null),!sharedState.config.scopes.includes('tasks:write')),sharedButton('Обновить общие задачи',()=>sharedAction(()=>request('/api/task-sync/exchange',{}))));
@@ -33,11 +43,18 @@ function appendSharedTaskRows(){
  const query=$('dashboard-search').value.trim().toLowerCase(),filter=$('dashboard-filter').value;
  let count=0;
  for(const task of Object.values(sharedState.tasks)){
-  if((dashboardMode==='history')!==!!task.completed||!`${task.title} ${task.stage||''}`.toLowerCase().includes(query))continue;
+  if((dashboardMode==='history')!==!!task.completed||!`${task.title} ${task.stage||''} ${task.id} ${task.binding.sourceId} ${task.binding.taskKey}`.toLowerCase().includes(query))continue;
   const status=sharedReport(sharedRun(task))?.status;
-  if(dashboardMode!=='history'&&filter!=='all'&&!(filter==='working'&&status==='running'&&sharedRunFresh(sharedRun(task))||filter==='waiting'&&(status==='waiting'||task.review?.state==='awaiting_dispatch'||task.review?.state==='awaiting_review')||filter==='paused'&&status!=='running'))continue;
+  const awaitingReview=['awaiting_dispatch','awaiting_review'].includes(task.review?.state),fresh=sharedRunFresh(sharedRun(task));
+  const matches=filter==='all'||filter==='current'&&(task.humanTimerActive||['running','waiting'].includes(status)&&fresh||awaitingReview)||filter==='working'&&status==='running'&&fresh||filter==='waiting'&&(status==='waiting'&&fresh||awaitingReview)||filter==='paused'&&task.humanTimerPaused===true;
+  if(dashboardMode!=='history'&&!matches)continue;
   const {row,main}=taskWidgetRow(task.title,{taskKey:task.binding.taskKey,onOpen:()=>openSharedTask(task.id),status:task.completed?(task.review?.state==='accepted'?'Результат принят':'Задача завершена'):sharedExecution(task),tone:task.review?.state==='awaiting_review'?'review':task.completed?'accepted':'neutral'});row.dataset.sharedTaskId=task.id;
-  const run=sharedReport(sharedRun(task));main.append(el('p','task-stage',task.stage||'Этап не задан',true),el('p','task-executor',`${run?.agent||'Исполнитель неизвестен'} · ${run?.model||'Модель неизвестна'}`,true),el('p','task-meta',`Твой таймер: ${task.humanTimerActive?'идёт':'не идёт'}${task.freshness==='fresh'?'':task.freshness==='stale'?' · данные могут устареть':' · свежесть данных неизвестна'}`,true));
+  const run=sharedReport(sharedRun(task));if(task.stage)main.append(el('p','task-stage',task.stage,true));
+  const meta=[run?.agent||'Исполнитель неизвестен',run?.model||'Модель неизвестна'];
+  if(run?.receivedAt)meta.push(`Отчёт: ${when(run.receivedAt)}`);
+  if(task.humanTimerActive)meta.push('Твой таймер идёт');
+  if(task.freshness!=='fresh')meta.push(task.freshness==='stale'?'Данные могут устареть':'Свежесть данных неизвестна');
+  main.append(el('p','task-meta',meta.join(' · '),true));
   list.append(row);count++;
  }
  for(const [op,item] of Object.entries(sharedState.outbox)){

@@ -465,6 +465,13 @@ class Store:
             # A settings change between reads must not join two Cicada profiles.
             historical = {'tasks': [], 'status': 'source_changed'}
         source['historyTasks'] = historical['tasks']
+        available = self.cicada.snapshot(bindings=pairs, personal_only=True)
+        if (available.get('source') or {}).get('sourceKey') != source_key:
+            available = {'tasks': [], 'status': 'source_changed'}
+        # Keep the existing current-work contract; expose idle personal tasks separately.
+        source['availableTasks'] = available['tasks']
+        source['availableStatus'] = available['status']
+        source['availableLimited'] = available.get('hasMore', False)
         source['historyStatus'] = historical['status']
         source['historyLimited'] = bool(source_key) and sum(key.startswith('cicada-'+source_key+'-') for key in keys) > 500
         known = {task['taskKey']: task for task in source['tasks']}
@@ -928,6 +935,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond(400, {'error': 'Не удалось прочитать skill. Проверь путь и формат файла.'})
         files = {"/": ("index.html", "text/html; charset=utf-8"),
                  "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                 "/drafts.js": ("drafts.js", "text/javascript; charset=utf-8"),
                  "/i18n.js": ("i18n.js", "text/javascript; charset=utf-8"),
                  "/workspace.js": ("workspace.js", "text/javascript; charset=utf-8"),
                  "/providers.js": ("providers.js", "text/javascript; charset=utf-8"),
@@ -987,7 +995,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             path = urlsplit(self.path).path
-            limit = 2 * 1024 * 1024 if path.startswith(('/api/skills/', '/api/projects/', '/api/extensions/', '/api/rules/', '/api/data-sources/', '/api/pipelines/', '/api/work-exchange/')) else 4096
+            # A valid 8000 UTF-8-byte task result can occupy up to 48KB in
+            # escaped JSON. Keep a bounded envelope; native field limits apply.
+            limit = 64 * 1024 if path == '/api/task-sync/queue' else 2 * 1024 * 1024 if path.startswith(('/api/skills/', '/api/projects/', '/api/extensions/', '/api/rules/', '/api/data-sources/', '/api/pipelines/', '/api/work-exchange/')) else 4096
             if length < 1 or length > limit:
                 return self.respond(413, {"error": "Неверный размер запроса."})
             self.connection.settimeout(5)

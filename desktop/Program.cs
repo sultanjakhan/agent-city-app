@@ -4,6 +4,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Runtime.InteropServices;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -97,7 +98,7 @@ internal sealed class PrivateBridge
             var frame = agentRequest is null
                 ? JsonSerializer.Serialize(new { version = 1, id, action, draftsClosed })
                 : JsonSerializer.Serialize(new { version = 1, id, action, draftsClosed, request = agentRequest });
-            if (Encoding.UTF8.GetByteCount(frame) >= 16384) throw new InvalidDataException("Private frame limit");
+            if (Encoding.UTF8.GetByteCount(frame) >= (action == "agent-request" ? 64 * 1024 : 16384)) throw new InvalidDataException("Private frame limit");
             await process!.StandardInput.WriteLineAsync(frame.AsMemory(), timeout.Token);
             await process.StandardInput.FlushAsync(timeout.Token);
             var reply = await ReadFrame(process.StandardOutput, timeout.Token, action == "agent-request" ? 1024 * 1024 : 16384);
@@ -152,6 +153,7 @@ internal sealed class CityWindow : Form
     private readonly DesktopLocale locale = new();
     private readonly System.Windows.Forms.Timer localeRefresh = new() { Interval = 1000 };
     private bool confirmationBusy;
+    private string? draftFreezeId;
     private Task? localeReadTask;
     private long localeReadEpoch = -1;
     private string statusKey = nameof(DesktopText.Starting);
@@ -294,13 +296,12 @@ internal sealed class CityWindow : Form
             if (closing || IsDisposed) return;
             AcceptUpdate(result);
             if (!result.Available && pendingUpdateJob == null)
-                MessageBox.Show(this, NativeText(result.Reason == "not-newer" ? nameof(DesktopText.UpToDate) : nameof(DesktopText.UpdateCheckUnavailable)),
-                    "Agent City", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                SetStatus(result.Reason == "not-newer" ? nameof(DesktopText.UpToDate) : nameof(DesktopText.UpdateCheckUnavailable));
         }
         catch
         {
             if (!closing && !IsDisposed)
-                MessageBox.Show(this, NativeText(nameof(DesktopText.UpdateCheckUnavailable)), "Agent City", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                SetStatus(nameof(DesktopText.UpdateCheckUnavailable));
         }
         finally { updateBusy = false; checkUpdates.Enabled = !closing; }
     }
@@ -352,20 +353,54 @@ internal sealed class CityWindow : Form
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Activate(); BringToFront();
     }
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+    private bool CanPresentDraftPrompt()
+    {
+        return WindowState != FormWindowState.Minimized && GetAncestor(GetForegroundWindow(), 2) == Handle;
+    }
+    private async Task ReleaseDraftFreeze()
+    {
+        var id = draftFreezeId; draftFreezeId = null;
+        if (id != null && IsCurrentLocaleDocument(documentEpoch))
+            try { await localeCore!.ExecuteScriptAsync(DesktopDrafts.Cancel(id)).WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
+    }
     private async Task<bool> ConfirmDrafts(string questionKey)
     {
         if (confirmationBusy || busy || closing || IsDisposed) return false;
         confirmationBusy = true;
         recover.Enabled = restart.Enabled = revoke.Enabled = false;
+        var epoch = documentEpoch; var id = Guid.NewGuid().ToString("N"); var accepted = false;
         try
         {
-            await RefreshNativeLocale();
-            if (busy || closing || IsDisposed) return false;
-            return MessageBox.Show(this, NativeText(nameof(DesktopText.SaveDrafts)) + NativeText(questionKey),
-                "Agent City", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+            if (!IsCurrentLocaleDocument(epoch)) { SetStatus(nameof(DesktopText.CloseUnavailable)); return false; }
+            var core = localeCore!;
+            var flags = DesktopDrafts.Parse(await core.ExecuteScriptAsync(DesktopDrafts.Snapshot).WaitAsync(TimeSpan.FromSeconds(2)));
+            if (!IsCurrentLocaleDocument(epoch)) return false;
+            if (flags == null) { SetStatus(nameof(DesktopText.CloseUnavailable)); return false; }
+            if (flags.Busy) { SetStatus(nameof(DesktopText.Saving)); return false; }
+            var foreground = CanPresentDraftPrompt();
+            if (flags.Dirty && !foreground) { SetStatus(nameof(DesktopText.DraftsPending)); return false; }
+            var action = questionKey == nameof(DesktopText.RestartQuestion) ? "restart" : "close";
+            var reply = await core.ExecuteScriptAsync(DesktopDrafts.Request(id, action, foreground)).WaitAsync(TimeSpan.FromSeconds(2));
+            var until = DateTime.UtcNow.AddMinutes(2);
+            while (IsCurrentLocaleDocument(epoch) && !busy && DateTime.UtcNow < until)
+            {
+                if (reply.Length > 64) return false;
+                var result = JsonSerializer.Deserialize<string>(reply);
+                if (result is "clean" or "discard") { draftFreezeId = id; accepted = true; return true; }
+                if (result != "pending" || !CanPresentDraftPrompt()) { SetStatus(nameof(DesktopText.DraftsPending)); return false; }
+                await Task.Delay(150);
+                if (!IsCurrentLocaleDocument(epoch)) return false;
+                reply = await core.ExecuteScriptAsync(DesktopDrafts.Poll(id)).WaitAsync(TimeSpan.FromSeconds(2));
+            }
+            return false;
         }
+        catch { SetStatus(nameof(DesktopText.CloseUnavailable)); return false; }
         finally
         {
+            if (!accepted && IsCurrentLocaleDocument(epoch))
+                try { await localeCore!.ExecuteScriptAsync(DesktopDrafts.Cancel(id)).WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
             confirmationBusy = false;
             recover.Enabled = restart.Enabled = revoke.Enabled = !busy && !closing && !IsDisposed;
         }
@@ -376,7 +411,7 @@ internal sealed class CityWindow : Form
         busy = true; recover.Enabled = restart.Enabled = revoke.Enabled = false;
         try { await operation(); }
         catch { SetStatus(nameof(DesktopText.ActionFailed)); }
-        finally { busy = false; recover.Enabled = restart.Enabled = revoke.Enabled = true; }
+        finally { busy = false; await ReleaseDraftFreeze(); recover.Enabled = restart.Enabled = revoke.Enabled = true; }
     }
     private async Task Initialize()
     {
@@ -517,7 +552,7 @@ internal sealed class CityWindow : Form
             }
             approvedClose = true; Close();
         }
-        catch { closing = false; SetStatus(nameof(DesktopText.DrainPending)); recover.Enabled = restart.Enabled = revoke.Enabled = true; }
+        catch { closing = false; await ReleaseDraftFreeze(); SetStatus(nameof(DesktopText.DrainPending)); recover.Enabled = restart.Enabled = revoke.Enabled = true; }
     }
     private static void DeleteOwnProfile(string path)
     {

@@ -6,7 +6,9 @@ test('shared task uses exact ID, honest execution, review and distinct timer',as
  const value=fixture(),sent=[];await page.route('**/api/task-sync',r=>r.fulfill({json:value}));
  await page.route('**/api/task-sync/queue',async r=>{const body=r.request().postDataJSON();sent.push(body);value.outbox[body.operationId]={state:'pending',request:body,conflict:null};await r.fulfill({json:value.outbox[body.operationId]});});
  await page.route('**/api/task-sync/exchange',r=>r.fulfill({json:value}));
- await page.goto('/#dashboard');const row=page.locator('[data-shared-task-id="synthetic-native-1"]');await expect(row).toHaveCount(1);await expect(row).toContainText('Результат ожидает проверки');await expect(row).toContainText('Твой таймер: не идёт');await expect(row).toContainText('Модель неизвестна');
+ await page.goto('/#dashboard');const row=page.locator('[data-shared-task-id="synthetic-native-1"]');await expect(row).toHaveCount(1);await expect(row).toContainText('Результат ожидает проверки');await expect(row).not.toContainText('Твой таймер: не идёт');await expect(row).toContainText('Модель неизвестна');
+ await page.locator('#dashboard-search').fill('synthetic-native-1');await expect(row).toHaveCount(1);
+ await page.locator('#dashboard-search').fill('cicada-synthetic-native-1');await expect(row).toHaveCount(1);await page.locator('#dashboard-search').fill('');
  await row.getByRole('button',{name:'Общая задача',exact:true}).click();const dialog=page.locator('#shared-task-dialog');await dialog.getByLabel('Комментарий / отзыв').fill('Сохрани прежний результат');await dialog.getByRole('button',{name:'Запросить доработку',exact:true}).click();await expect(dialog).not.toBeVisible();
  expect(sent).toHaveLength(1);expect(sent[0].arguments).toEqual({taskId:'synthetic-native-1',expectedVersion:3,resultVersion:1,decision:'rework',comment:'Сохрани прежний результат'});await expect(page.locator('.shared-pending').first()).toContainText('ожидает отправки');await expect(row).not.toContainText('ИИ работает');
 });
@@ -50,7 +52,7 @@ test('Cicada-style widget opens exact-ID review from its arrow and stays within 
  const value=fixture(),task=value.tasks['synthetic-native-1'];task.title='Проверить описание требований и сохранить замечания';
  const running=structuredClone(task);running.id='synthetic-native-2';running.binding.sourceId=running.id;running.binding.taskKey='cicada-synthetic-native-2';running.title='Подготовить план следующего этапа';running.stage='analysis';running.review=null;running.results=[];
  task.freshness='fresh';running.freshness='fresh';running.reports=[{runId:'synthetic-widget-run',agent:'Codex',model:'synthetic-model',receivedAt:new Date().toISOString(),status:'running'}];value.tasks[running.id]=running;value.lastSuccess=new Date().toISOString();value.failure=null;
- await page.route('**/api/task-sync',r=>r.fulfill({json:value}));await page.route('**/api/dashboard',async r=>{const body=await(await r.fetch()).json();body.cicada.tasks=[];await r.fulfill({json:body});});
+ await page.route('**/api/task-sync',r=>r.fulfill({json:value}));await page.route('**/api/dashboard',async r=>{const body=await(await r.fetch()).json();body.cicada.tasks=[];body.cicada.availableTasks=[];await r.fulfill({json:body});});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto('/#dashboard');
  const widget=page.locator('.task-widget'),row=page.locator('[data-shared-task-id="synthetic-native-1"]');await expect(widget).toBeVisible();await expect(page.locator('#task-widget-count')).toHaveText('Показано: 2');await expect(row.locator('.task-widget-status')).toContainText('ожидает проверки');
  await expect(page.locator('#work-registry')).toBeHidden();await expect(page.locator('#dashboard-view details,#dashboard-view summary')).toHaveCount(0);await expect(page.locator('#dashboard-view')).not.toContainText('Как это считается');

@@ -122,17 +122,17 @@ function scheduleDashboard(){if(dashboardTimer)return;if(view==='dashboard')dash
 function renderDashboard(){loadDashboard();if(typeof loadSharedTasks==='function')loadSharedTasks();if(typeof renderDataSourceDashboard==='function')renderDataSourceDashboard();}
 function taskRuns(task){return task._runs||(dashboardData?.runs||[]).filter(r=>(task.runTaskKeys||[task.taskKey]).includes(r.taskKey));}
 function historyEntries(){
- const known=new Map([...(dashboardData?.cicada?.tasks||[]),...(dashboardData?.cicada?.historyTasks||[])].flatMap(task=>(task.runTaskKeys||[task.taskKey]).map(key=>[key,task])));
+ const known=new Map([...(dashboardData?.cicada?.availableTasks||[]),...(dashboardData?.cicada?.tasks||[]),...(dashboardData?.cicada?.historyTasks||[])].flatMap(task=>(task.runTaskKeys||[task.taskKey]).map(key=>[key,task])));
  const grouped=new Map();
  for(const run of dashboardData?.runs||[]){const key=run.taskKey||`run:${run.originDevice||'local'}:${run.runId}`;if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(run);}
- return [...grouped].filter(([key,runs])=>!(typeof isSharedTask==='function'&&isSharedTask(key))&&(!known.has(key)||!runs.some(freshRun))).map(([key,runs])=>{
+ return [...grouped].filter(([key,runs])=>!(typeof isSharedTask==='function'&&isSharedTask(key,known.get(key)?.sourceId,dashboardData?.cicada?.source?.sourceNamespace))&&(!known.has(key)||!runs.some(freshRun))).map(([key,runs])=>{
   runs.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
   const task=known.get(key);
   const unbound=!key.startsWith('cicada-');
   return {...(task?{...task,taskKey:key}:{taskKey:key,title:(unbound?t('Запуск без задачи')+' · '+runs[0].runId:t('Задача Cicada')+' · '+key.slice(7,13)+'…'+key.slice(-12)),missingSource:true,unbound}),_runs:runs,lastReportAt:runs[0].updatedAt};
  }).sort((a,b)=>b.lastReportAt.localeCompare(a.lastReportAt));
 }
-function findDashboardTask(key){return dashboardData?.cicada.tasks.find(task=>(task.runTaskKeys||[task.taskKey]).includes(key))||historyEntries().find(task=>task.taskKey===key);}
+function findDashboardTask(key){return [...(dashboardData?.cicada.availableTasks||[]),...(dashboardData?.cicada.tasks||[])].find(task=>(task.runTaskKeys||[task.taskKey]).includes(key))||historyEntries().find(task=>task.taskKey===key);}
 function syncDashboardTabs(){
  for(const button of document.querySelectorAll('[data-dashboard-mode]')){const selected=button.dataset.dashboardMode===dashboardMode;button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;}
  $('dashboard-filter').hidden=dashboardMode==='history';
@@ -179,26 +179,29 @@ function renderDashboardRows(){
  syncDashboardTabs();
  const data=dashboardData.cicada,source=data.source;
  $('dashboard-source').textContent=source?t(data.status==='connected'?'{name} · прочитано {date}':'{name} · источник недоступен',{name:source.label,date:when(data.readAt)}):t('Cicada не подключена');
- $('dashboard-error').hidden=data.status!=='error';if(data.status==='error')$('dashboard-error').textContent=t(data.error||'Не удалось прочитать Cicada. Проверь источник в настройках.');
+ const unavailable=data.status==='error'||data.availableStatus&&data.availableStatus!=='connected'&&data.status==='connected';
+ $('dashboard-error').hidden=!unavailable;if(unavailable)$('dashboard-error').textContent=t(data.availableStatus==='source_changed'?'Источник изменился во время чтения. Обнови задачи.':data.error||'Не удалось прочитать Cicada. Проверь источник в настройках.');
  if(dashboardMode==='history'){renderHistoryRows();finishDashboardRender();return;}
  const query=$('dashboard-search').value.trim().toLowerCase(),filter=$('dashboard-filter').value;
- const all=data.tasks||[],tasks=all.filter(task=>!(typeof isSharedTask==='function'&&isSharedTask(task.taskKey))&&`${task.title} ${task.stageLabel||task.stage||''}`.toLowerCase().includes(query)&&(filter==='all'||filter==='working'&&(task.isActive||taskRuns(task).some(r=>r.status==='running'&&age(r.updatedAt)<=300))||filter==='waiting'&&(task.waiting||taskRuns(task).some(r=>r.status==='waiting'&&freshRun(r)))||filter==='paused'&&task.isPaused));
+ const all=filter==='current'?(data.tasks||[]):(data.availableTasks??data.tasks??[]),tasks=all.filter(task=>!(typeof isSharedTask==='function'&&isSharedTask(task.taskKey,task.sourceId,source?.sourceNamespace))&&`${task.title} ${task.stageLabel||task.stage||''} ${task.sourceId||''} ${task.taskKey}`.toLowerCase().includes(query)&&(filter==='all'||filter==='current'||filter==='working'&&taskRuns(task).some(r=>r.status==='running'&&freshRun(r))||filter==='waiting'&&(task.waiting||taskRuns(task).some(r=>r.status==='waiting'&&freshRun(r)))||filter==='paused'&&task.isPaused));
  tasks.sort((a,b)=>Number(b.isActive)-Number(a.isActive)||(a.date||'9999').localeCompare(b.date||'9999'));
  const list=$('dashboard-tasks'),focused=document.activeElement?.dataset.taskKey;list.replaceChildren();
  for(const task of tasks){
   const reports=taskRuns(task),active=reports.some(r=>freshRun(r)&&r.status==='running'),waiting=reports.some(r=>freshRun(r)&&r.status==='waiting');
-  const status=active?'ИИ работает · по отчёту':waiting?'ИИ ожидает · по отчёту':task.isActive?'Твой таймер идёт':task.waiting?'Ожидает':task.isPaused?'На паузе':'Статус ИИ неизвестен';
-  const {row,main}=taskWidgetRow(task.title,{taskKey:task.taskKey,onOpen:()=>openDashboardTask(task.taskKey),status});
-  main.append(el('p','task-stage',stageName(task),true));
-  const meta=[task.processLabel||task.process,task.date,task.plannedTime].filter(Boolean);if(meta.length)main.append(el('p','task-meta',meta.join(' · '),true));
-  const facts=taskFacts(task,reports);if(facts||!reports.length)main.append(el('p','task-executor',facts||t('Нет отчётов агента'),true));
-  if(reports.length){const latest=[...reports].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))[0];main.append(el('p','task-meta',`${latest.agent||t('Исполнитель неизвестен')} · ${latest.model||t('Модель не сообщена')} · ${t('Последний отчёт')}: ${when(latest.updatedAt)}`,true));}
-  main.append(el('p','task-meta',t('Твой таймер: {state}',{state:t(task.isActive?'идёт':task.isPaused?'на паузе':'не идёт')}),true));
+  const latest=[...reports].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))[0];
+  const status=active?'ИИ работает':waiting?'ИИ ожидает':latest?`ИИ: ${runState(latest)}`:'Статус ИИ неизвестен';
+  const {row,main}=taskWidgetRow(task.title,{taskKey:task.taskKey,onOpen:()=>openDashboardTask(task.taskKey),status,tone:active?'active':latest?.status==='error'?'warn':'neutral'});
+  if(task.stageLabel||task.stage)main.append(el('p','task-stage',stageName(task),true));
+  const meta=[task.date,task.plannedTime].filter(Boolean);
+  if(latest)meta.push(latest.agent||t('Исполнитель неизвестен'),latest.model||t('Модель не сообщена'),`${t('Отчёт')}: ${when(latest.updatedAt)}`);
+  else meta.push(t('Нет отчётов агента'));
+  if(task.isActive||task.isPaused)meta.push(t(task.isActive?'Твой таймер идёт':'Твой таймер на паузе'));
+  main.append(el('p','task-meta',meta.join(' · '),true));
   list.append(row);
  }
  if(focused)[...list.querySelectorAll('button')].find(b=>b.dataset.taskKey===focused)?.focus({preventScroll:true});
- $('dashboard-empty').hidden=!!tasks.length;$('dashboard-empty').textContent=t(data.status==='disconnected'?'Выбери источник задач в настройках.':data.status==='error'?'Данные задач недоступны.':all.length?'Ничего не нашлось':'Сейчас ничего не запущено. Запусти задачу в Cicada — она появится здесь.');
- if(data.hasMore)list.append(el('p','section-description','Показаны первые 500 задач.'));
+ $('dashboard-empty').hidden=!!tasks.length;$('dashboard-empty').textContent=t(data.status==='disconnected'?'Выбери источник задач в настройках.':data.status==='error'||data.availableStatus==='error'?'Данные задач недоступны.':all.length?'Ничего не нашлось':filter==='current'?'Сейчас ничего не запущено.':'В выбранной Cicada нет открытых личных задач.');
+ if(data.availableLimited)list.append(el('p','section-description','Показаны первые 500 личных задач.'));
  if(typeof appendSharedTaskRows==='function')appendSharedTaskRows();
  finishDashboardRender();
 }
@@ -219,6 +222,11 @@ function renderDashboardTask(){
  const link=el('button','secondary','Ссылка');link.id='copy-report-link';link.title=t('Скопировать ссылку на отчёт');link.addEventListener('click',()=>{const url=new URL(location.href);url.search='';url.searchParams.set('task',task.taskKey);url.searchParams.set('history','1');url.hash='dashboard';navigator.clipboard.writeText(url.href).then(()=>toast('Ссылка скопирована')).catch(()=>toast('Не удалось скопировать'));});actions.append(link);
  if(task.taskKey.startsWith('cicada-')){const copy=el('button','text-button','ID задачи');copy.id='copy-task-id';copy.title=t('Копировать ID задачи для агента');copy.addEventListener('click',()=>navigator.clipboard.writeText(task.taskKey).then(()=>toast('ID скопирован')).catch(()=>toast('Не удалось скопировать')));actions.append(copy);}
  const copyReport=el('button','primary','Скопировать отчёт');copyReport.id='copy-task-report';copyReport.addEventListener('click',()=>navigator.clipboard.writeText(taskReportText(task,runs)).then(()=>toast('Отчёт скопирован')).catch(()=>toast('Не удалось скопировать')));actions.prepend(copyReport);
+ if(!task.missingSource&&!task.completed&&task.sourceId&&Number.isInteger(task.version)){
+  const connected=sharedState?.config.enabled&&sharedState.config.sourceNamespace===dashboardData.cicada.source?.sourceNamespace;
+  const share=sharedButton(connected?'Подключить задачу к обмену':'Настроить обмен задачами',()=>connected?sharedAction(async()=>{await queueShared('share',{taskId:task.sourceId,expectedVersion:task.version});if(Object.values(sharedState.tasks).some(t=>t.id===task.sourceId)){$('dashboard-task-dialog').close();dashboardTaskKey=null;openSharedTask(task.sourceId);}}):($('dashboard-task-dialog').close(),dashboardTaskKey=null,openTaskConnection()),connected&&!sharedState.config.scopes.includes('tasks:write'));
+  share.id='share-native-task';actions.prepend(share);
+ }
  body.scrollTop=scroll;if(focused&&actions.contains($(focused)))$(focused).focus({preventScroll:true});
 }
 function openDashboardTask(key){dashboardTaskKey=key;$('dashboard-task-body').replaceChildren();$('dashboard-task-body').scrollTop=0;renderDashboardTask();$('dashboard-task-dialog').showModal();}

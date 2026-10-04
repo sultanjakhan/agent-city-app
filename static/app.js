@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION='0.5.24';
+const UI_VERSION='0.5.25';
 const t=I18n.t;
 I18n.init();
 const $ = id => document.getElementById(id);
@@ -49,7 +49,11 @@ function el(tag,cls,text,raw=false){const n=document.createElement(tag);if(cls)n
 function age(v){const n=Date.parse(v);return Number.isFinite(n)?Math.max(0,(Date.now()-n)/1000):Infinity;}
 function when(v){return Number.isFinite(Date.parse(v))?new Date(v).toLocaleString(I18n.locale,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):t('ещё не проверяли');}
 function toast(text){$('toast').textContent=t(text);$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,3500);}
-async function request(path,body){if(window.agentCityOwnerReady&&!(await window.agentCityOwnerReady))throw Error('Откройте Agent City через launcher.');const epoch=providerStateEpoch;const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json','X-Agent-City':'1','X-Agent-City-Token':state?.csrfToken||''},body:JSON.stringify(body)}:{});const data=await r.json();if(!r.ok){if(r.status===401&&window.agentCityOwnerDenied)window.agentCityOwnerDenied();const error=Error(data.error||'Не удалось выполнить запрос');error.status=r.status;throw error;}if(data.providerRegistry&&epoch!==providerStateEpoch)return state;return data;}
+async function request(path,body){
+ const draft=body?window.agentCityDrafts?.begin(path,body):null;let saved=false;
+ try{if(window.agentCityOwnerReady&&!(await window.agentCityOwnerReady))throw Error('Откройте Agent City через launcher.');const epoch=providerStateEpoch;const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json','X-Agent-City':'1','X-Agent-City-Token':state?.csrfToken||''},body:JSON.stringify(body)}:{});const data=await r.json();if(!r.ok){if(r.status===401&&window.agentCityOwnerDenied)window.agentCityOwnerDenied();const error=Error(data.error||'Не удалось выполнить запрос');error.status=r.status;throw error;}saved=true;if(data.providerRegistry&&epoch!==providerStateEpoch)return state;return data;}
+ finally{window.agentCityDrafts?.end(draft,saved);}
+}
 function replied(check){return ['ok','mismatch'].includes(check?.status)&&!!check?.reply&&check?.finishReason==='stop';}
 function status(route){
   const c=route.check;
@@ -292,7 +296,7 @@ function openKey(provider){
   if(state.settings?.localOnly){toast('Работа с ключами приостановлена в local-only');return;}
   if(keyAction){toast('Дождись сохранения ключа');return;}
   keyProvider=provider;const source=state.sources.find(s=>s.id===provider),info=state.credentialInfo?.[provider]||{};
-  $('key-title').textContent=source.name;$('api-key').value='';$('key-error').hidden=true;
+  $('key-title').textContent=source.name;$('api-key').value='';$('api-key').dataset.draftProvider=source.id;$('key-error').hidden=true;
   $('key-account').href=source.keyUrl;$('key-terms').textContent=t(source.terms||'Сохранение ключа не отправляет запросы к модели. После обновления каталога проверку можно запустить в её карточке.');
   $('key-current').textContent=t(info.source==='environment'?'Сейчас используется ключ из окружения. Сохранённый здесь ключ получит приоритет.':info.available?'Ключ уже найден на компьютере. Можно заменить его новым.':'Создай ключ в аккаунте провайдера и вставь в поле ниже.');
   $('save-key').disabled=info.canSave===false;$('api-key').disabled=info.canSave===false;
@@ -307,7 +311,7 @@ async function changeKey(action){
   keyAction=action;
   const button=action==='save'?$('save-key'):$('remove-key');button.disabled=true;$('key-error').hidden=true;
   try{const body={provider,action};if(action==='save')body.key=$('api-key').value.trim();
-    state=await request('/api/credential',body);if(keyProvider===provider){$('api-key').value='';$('key-dialog').close();render();}
+    state=await request('/api/credential',body);if(keyProvider===provider){$('api-key').value='';window.agentCityDrafts?.reset($('api-key'));$('key-dialog').close();render();}
     toast(action==='save'?'Ключ сохранён. Обновляю каталог.':'Сохранённый ключ удалён');
     if(action==='save')await refreshSource(provider);
   }catch(e){if(keyProvider===provider){$('key-error').textContent=t(e.message);$('key-error').hidden=false;button.disabled=false;if(!$('key-dialog').open)toast(e.message);}}
@@ -389,13 +393,13 @@ $('cancel-checks').addEventListener('click',async()=>{try{state=await request('/
 function inlineKeyForm(source,info,existing){
  if(existing){const input=existing.querySelector('input');input.disabled=info.canSave===false;existing.querySelector('button').disabled=info.canSave===false;input.placeholder=t(info.available?'Новый ключ для замены':'Вставь ключ сюда');input.setAttribute('aria-label',t('API-ключ')+' '+source.name);existing.querySelector('label').firstChild.nodeValue=t('API-ключ')+' · '+source.name;existing.querySelector('button').textContent=t('Сохранить и подключить');existing.querySelector('a').textContent=t('Получить API-ключ ↗');existing.querySelector('.inline-key-message').textContent=t(existing.dataset.notice||'');return existing;}
  const form=el('form','inline-key-form');form.dataset.keyProvider=source.id;form.autocomplete='off';
- const label=el('label','',t('API-ключ')+' · '+source.name),input=el('input');input.type='password';input.autocomplete='new-password';input.minLength=20;input.maxLength=2048;input.required=true;input.spellcheck=false;input.placeholder=t(info.available?'Новый ключ для замены':'Вставь ключ сюда');input.setAttribute('aria-label',t('API-ключ')+' '+source.name);input.disabled=info.canSave===false;label.append(input);
+ const label=el('label','',t('API-ключ')+' · '+source.name),input=el('input');input.type='password';input.dataset.draftProvider=source.id;input.autocomplete='new-password';input.minLength=20;input.maxLength=2048;input.required=true;input.spellcheck=false;input.placeholder=t(info.available?'Новый ключ для замены':'Вставь ключ сюда');input.setAttribute('aria-label',t('API-ключ')+' '+source.name);input.disabled=info.canSave===false;label.append(input);
  const button=el('button','primary','Сохранить и подключить');button.type='submit';button.disabled=info.canSave===false;
  const message=el('p','inline-key-message');message.setAttribute('role','status');
  form.append(label,button,link('Получить API-ключ ↗',source.keyUrl),message);
  const showMessage=text=>{form.dataset.notice=text;message.textContent=t(text);};
  form.addEventListener('submit',async e=>{e.preventDefault();if(keyAction){showMessage('Дождись сохранения ключа');return;}keyAction='inline';button.disabled=true;input.disabled=true;showMessage('Сохранение…');
-  try{state=await request('/api/credential',{provider:source.id,action:'save',key:input.value.trim()});input.value='';showMessage('Ключ сохранён. Обновляю каталог.');await refreshSource(source.id);}
+  try{state=await request('/api/credential',{provider:source.id,action:'save',key:input.value.trim()});input.value='';window.agentCityDrafts?.reset(input);showMessage('Ключ сохранён. Обновляю каталог.');await refreshSource(source.id);}
   catch(e){showMessage(e.message);}finally{keyAction=null;button.disabled=info.canSave===false;input.disabled=info.canSave===false;}
  });return form;
 }

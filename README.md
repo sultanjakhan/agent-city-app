@@ -65,6 +65,11 @@ and be referenced by the private pointer. Never publish the private pointer.
 
 ## Checks
 
+For opt-in API/MCP access to both installed applications, see
+[local agent client setup](docs/AGENT-CLIENT-SETUP.md). Its setup command plans
+before writing, preserves existing client configuration and accepts each user's
+private paths. Automatic lifecycle hooks are a separate explicit option.
+
 Run `python -m unittest discover -s tests`, `npm run check` and, after installing
 the development dependencies, `npm run test:ui`. The separation acceptance check
 is `python tools/verify_separation.py`; it uses temporary synthetic data and an

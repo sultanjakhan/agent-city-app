@@ -41,7 +41,7 @@ def method(source, name):
 
 
 def baseline():
-    return json.loads((ROOT / 'tests/fixtures/native-copy-baseline.json').read_text('utf8'))
+    return json.loads((ROOT / 'tests/fixtures/native-lifecycle-baseline.json').read_text('utf8'))
 
 
 def generate(output):
@@ -51,24 +51,20 @@ def generate(output):
     # Prove that copy wiring leaves actual broker/authority/recovery code intact.
     for name in ('WirePolicy', 'PrivateBridge'):
         token = 'internal ' + ('static' if name == 'WirePolicy' else 'sealed') + ' class ' + name
-        assert body(source, source.index(token)) == body(original, original.index(token)), name
-    assert method(source, 'Bootstrap').replace('SetStatus(nameof(DesktopText.RecoveryReady))',
-        'status.Text = DesktopText.RecoveryReady') == method(original, 'Bootstrap')
-    assert method(source, 'ObserveBackend').replace('SetStatus(nameof(DesktopText.BackendUnavailable))',
-        'status.Text = DesktopText.BackendUnavailable') == method(original, 'ObserveBackend')
-    original_failure = re.search(r'catch \{ status.Text = ("(?:[^"\\]|\\.)*"); \}', method(original, 'Action'))[1]
-    assert method(source, 'Action').replace('SetStatus(nameof(DesktopText.ActionFailed))',
-        'status.Text = ' + original_failure) == method(original, 'Action')
-    original_close = method(original, 'OnClosing')
-    question = re.search(r'ConfirmDrafts\(("(?:[^"\\]|\\.)*")\)', original_close)[1]
-    drain = re.search(r'catch \{ closing = false; status.Text = ("(?:[^"\\]|\\.)*");', original_close)[1]
-    normalized_close = method(source, 'OnClosing').replace('await ConfirmDrafts(nameof(DesktopText.CloseQuestion))',
-        'ConfirmDrafts(' + question + ')').replace('localeRefresh.Stop(); ', '').replace(
-        'SetStatus(nameof(DesktopText.DrainPending))', 'status.Text = ' + drain)
-    update_start = normalized_close.index('            updater?.Dispose();')
-    update_end = normalized_close.index('            approvedClose = true; Close();', update_start)
-    normalized_close = normalized_close[:update_start] + normalized_close[update_end:]
-    assert normalized_close == original_close
+        current = body(source, source.index(token))
+        # The agent payload envelope admits escaped, field-bounded task text.
+        # All broker authority and non-agent control limits remain identical.
+        if name == 'PrivateBridge':
+            updated = '(action == "agent-request" ? 64 * 1024 : 16384)'
+            assert current.count(updated) == 1
+            current = current.replace(updated, '16384')
+        assert current == body(original, original.index(token)), name
+    assert reference['sourceCommit'] == 'd3aafd700e4b832f415a18311431d1c75453d8e3'
+    for name in ('Bootstrap', 'ObserveBackend'):
+        assert method(source, name) == method(original, name), name
+    # Only a renderer unlock is added on rollback; lifecycle authority is unchanged.
+    for name in ('Action', 'OnClosing'):
+        assert method(source, name).replace('await ReleaseDraftFreeze(); ', '') == method(original, name), name
     for unchanged in ['desktop/RecoveryScripts.cs', 'desktop/recovery.js', 'static/owner-session.js',
                       'static/i18n.js', 'static/work-registry.js']:
         assert hashlib.sha256((ROOT / unchanged).read_text('utf8').encode()).hexdigest() == reference['unchangedSha256'][unchanged], unchanged
@@ -79,8 +75,12 @@ def generate(output):
         assert setting in source
     assert 'localeRefresh.Tick += async (_, _) => { if (!busy && (localeReadTask == null || localeReadTask.IsCompleted)) await RefreshNativeLocale(); };' in source
     assert 'localeRefresh.Stop();' in source and 'localeRefresh.Dispose();' in source
-    assert 'await RefreshNativeLocale();' in method(source, 'ConfirmDrafts')
-    assert 'MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes' in method(source, 'ConfirmDrafts')
+    assert 'DesktopDrafts.Snapshot' in method(source, 'ConfirmDrafts')
+    assert 'MessageBox' not in method(source, 'ConfirmDrafts')
+    assert 'flags.Dirty && !foreground' in method(source, 'ConfirmDrafts')
+    assert 'DesktopDrafts.Request(id, action, foreground)' in method(source, 'ConfirmDrafts')
+    assert 'GetAncestor(GetForegroundWindow(), 2) == Handle' in method(source, 'CanPresentDraftPrompt')
+    assert 'MessageBox' not in method(source, 'CheckForUpdates')
     assert '!await ConfirmDrafts(nameof(DesktopText.RestartQuestion))' in source
     assert 'loaded && !await ConfirmDrafts(nameof(DesktopText.CloseQuestion))' in source
     assert len(re.findall(r'bridge\.Command\("', source)) == len(re.findall(r'bridge\.Command\("', original))
@@ -88,7 +88,7 @@ def generate(output):
     assert re.findall(r'bridge\.Command\("[^)]*\)', source) == re.findall(r'bridge\.Command\("[^)]*\)', original)
     actual = '\n'.join(method(source, name).replace('private ', 'internal ', 1)
         for name in ['IsCurrentLocaleDocument', 'NativeText', 'RenderNativeCopy', 'RenderStatus', 'SetStatus',
-                     'RefreshNativeLocale', 'ReadNativeLocale', 'ConfirmDrafts'])
+                     'RefreshNativeLocale', 'ReadNativeLocale', 'CanPresentDraftPrompt', 'ReleaseDraftFreeze', 'ConfirmDrafts'])
     starting = body(source, source.index('core.NavigationStarting +=')).split('=>', 1)[1].strip()
     completed = body(source, source.index('core.NavigationCompleted +=')).split('=>', 1)[1].strip()
     changed = body(source, source.index('core.SourceChanged +=')).split('=>', 1)[1].strip()
@@ -109,8 +109,15 @@ internal sealed class FakeCore
     internal string Source { get { if(ThrowSource) throw new Exception("synthetic unavailable"); return source; } set {source=value;} }
     internal int Reads;
     internal Func<Task<string>> Reader = () => Task.FromResult("{\"version\":1,\"language\":\"en\"}");
+    internal int DraftReads, Prompts, Cancels;
+    internal Func<Task<string>> DraftReader = () => Task.FromResult("{\"version\":1,\"dirty\":false,\"busy\":false}");
+    internal string PromptReply="\"clean\"", PollReply="\"cancel\"";
     internal Task<string> ExecuteScriptAsync(string script)
     {
+        if(script==DesktopDrafts.Snapshot){DraftReads++;return DraftReader();}
+        if(script.StartsWith("window.agentCityDrafts?.request(")){Prompts++;return Task.FromResult(PromptReply);}
+        if(script.StartsWith("window.agentCityDrafts?.poll("))return Task.FromResult(PollReply);
+        if(script.StartsWith("window.agentCityDrafts?.cancel(")){Cancels++;return Task.FromResult("null");}
         if(script != DesktopLocale.SnapshotScript) throw new Exception("Non-read-only script");
         Reads++; return Reader();
     }
@@ -121,6 +128,7 @@ internal sealed class FakeBridge { internal Uri? Origin = new("http://agent-city
 internal sealed class Starting { internal string Uri = ""; internal ulong NavigationId; internal bool Cancel; }
 internal sealed class Completed { internal ulong NavigationId; internal bool IsSuccess; }
 internal sealed class Changed { internal bool IsNewDocument; }
+internal enum FormWindowState { Normal, Minimized }
 internal enum MessageBoxButtons { YesNo }
 internal enum MessageBoxIcon { Question }
 internal enum DialogResult { Yes, No }
@@ -142,6 +150,12 @@ internal sealed class CityWindow
     internal string? pendingUpdateVersion;
     internal FakeCore? localeCore;
     internal bool IsDisposed, busy, closing, confirmationBusy;
+    internal string? draftFreezeId;
+    internal FormWindowState WindowState;
+    internal IntPtr Handle = new(42);
+    internal static IntPtr Foreground = new(42);
+    internal static IntPtr GetForegroundWindow() => Foreground;
+    internal static IntPtr GetAncestor(IntPtr window,uint flags) => window;
     internal Task? localeReadTask;
     internal long localeReadEpoch=-1;
     internal long documentEpoch, completedEpoch = -1;
@@ -176,12 +190,26 @@ internal static class NativeHostWiringContract
         host.SetStatus(nameof(DesktopText.AccessRevoked));Check(host.status.Text==DesktopText.ForLanguage(nameof(DesktopText.AccessRevoked),"en"),"Status did not use locale");
         core.Reader=()=>Task.FromResult("{\"version\":1,\"language\":\"ru\"}");await host.RefreshNativeLocale();
         Check(host.recover.Text==DesktopText.Recover&&host.status.Text==DesktopText.AccessRevoked,"Actual host RU switch");
-        Check(await host.ConfirmDrafts(nameof(DesktopText.RestartQuestion)),"RU confirmation result");
-        Check(MessageBox.LastText==DesktopText.SaveDrafts+DesktopText.RestartQuestion,"Actual RU confirmation copy");
-        core.Reader=()=>Task.FromResult("{\"version\":1,\"language\":\"en\"}");
-        Check(await host.ConfirmDrafts(nameof(DesktopText.CloseQuestion)),"EN confirmation result");
-        Check(MessageBox.LastText==DesktopText.ForLanguage(nameof(DesktopText.SaveDrafts),"en")+DesktopText.ForLanguage(nameof(DesktopText.CloseQuestion),"en"),"Actual EN confirmation copy");
-        MessageBox.Result=DialogResult.No;Check(!await host.ConfirmDrafts(nameof(DesktopText.CloseQuestion)),"No changed to Yes");MessageBox.Result=DialogResult.Yes;
+
+        Check(await host.ConfirmDrafts(nameof(DesktopText.CloseQuestion)),"Clean close refused");
+        Check(MessageBox.Calls==0&&core.Prompts==1&&host.draftFreezeId!=null,"Clean close raised a native dialog or did not freeze input");
+        await host.ReleaseDraftFreeze();Check(host.draftFreezeId==null,"Close rollback stayed frozen");
+        core.DraftReader=()=>Task.FromResult("{\"version\":1,\"dirty\":true,\"busy\":false}");
+        var prompts=core.Prompts;CityWindow.Foreground=new IntPtr(99);
+        Check(!await host.ConfirmDrafts(nameof(DesktopText.CloseQuestion))&&core.Prompts==prompts,"Background dirty close showed a prompt");
+        CityWindow.Foreground=host.Handle;host.WindowState=FormWindowState.Minimized;
+        Check(!await host.ConfirmDrafts(nameof(DesktopText.CloseQuestion))&&core.Prompts==prompts,"Minimized dirty close raised a prompt");
+        host.WindowState=FormWindowState.Normal;core.PromptReply="\"pending\"";
+        Check(!await host.ConfirmDrafts(nameof(DesktopText.CloseQuestion))&&host.draftFreezeId==null,"Cancel discarded edits");
+        core.PollReply="\"discard\"";
+        Check(await host.ConfirmDrafts(nameof(DesktopText.RestartQuestion))&&host.draftFreezeId!=null,"Explicit discard refused");
+        await host.ReleaseDraftFreeze();
+        core.DraftReader=()=>Task.FromResult("{\"version\":1,\"dirty\":false,\"busy\":true}");prompts=core.Prompts;
+        Check(!await host.ConfirmDrafts(nameof(DesktopText.CloseQuestion))&&core.Prompts==prompts,"Close overlapped a write");
+        foreach(var invalid in new[]{"null","malformed","{\"version\":1,\"dirty\":false}","{\"version\":1,\"dirty\":false,\"busy\":false,\"secret\":\"ignored\"}","{\"version\":2,\"dirty\":false,\"busy\":false}","{\"version\":1,\"dirty\":false,\"dirty\":false,\"busy\":false}",new string('x',129)})
+        {core.DraftReader=()=>Task.FromResult(invalid);Check(!await host.ConfirmDrafts(nameof(DesktopText.CloseQuestion)),"Unknown draft state silently discarded");}
+        core.DraftReader=()=>Task.FromResult("{\"version\":1,\"dirty\":false,\"busy\":false}");core.PromptReply="\"clean\"";
+        core.Reader=()=>Task.FromResult("{\"version\":1,\"language\":\"en\"}");await host.RefreshNativeLocale();
         foreach(var invalid in new[]{"null","{\"version\":1,\"language\":\"fr\"}","malformed"})
         {core.Reader=()=>Task.FromResult(invalid);await host.RefreshNativeLocale();Check(host.locale.LanguageFor(host.documentEpoch)=="en","Unknown language invented fallback");}
         var reads=core.Reads;host.busy=true;await host.RefreshNativeLocale();host.busy=false;Check(core.Reads==reads,"Locale read overlapped auth action");
@@ -202,13 +230,13 @@ internal static class NativeHostWiringContract
         var never=new TaskCompletionSource<string>();core.Reader=()=>never.Task;await host.RefreshNativeLocale();
         Check(host.localeReadTask!.IsCompleted&&host.locale.LanguageFor(host.documentEpoch)=="en","Timeout changed locale or wedged refresh");
         never.SetResult("{\"version\":1,\"language\":\"ru\"}");Check(host.locale.LanguageFor(host.documentEpoch)=="en","Late timeout changed host copy");
-        var confirmation=new TaskCompletionSource<string>();core.Reader=()=>confirmation.Task;var first=host.ConfirmDrafts(nameof(DesktopText.CloseQuestion));var calls=MessageBox.Calls;
+        var confirmation=new TaskCompletionSource<string>();core.DraftReader=()=>confirmation.Task;var first=host.ConfirmDrafts(nameof(DesktopText.CloseQuestion));var calls=MessageBox.Calls;
         Check(!host.recover.Enabled&&!host.restart.Enabled&&!host.revoke.Enabled,"Native actions active during pending confirmation");
         Check(!await host.ConfirmDrafts(nameof(DesktopText.CloseQuestion)),"Confirmation reentered while read pending");host.closing=true;
-        confirmation.SetResult("{\"version\":1,\"language\":\"en\"}");Check(!await first&&MessageBox.Calls==calls,"Dialog shown after closing");
+        confirmation.SetResult("{\"version\":1,\"dirty\":false,\"busy\":false}");Check(!await first&&MessageBox.Calls==calls,"Dialog shown after closing");
         host.closing=false;host.IsDisposed=true;reads=core.Reads;await host.RefreshNativeLocale();Check(core.Reads==reads,"Disposed window read");
         host.IsDisposed=false;host.view.IsDisposed=true;await host.RefreshNativeLocale();Check(core.Reads==reads,"Disposed WebView read");
-        Console.WriteLine("PASS actual CityWindow methods/hooks on no-window doubles: origin/retained-core/ready-epoch checks, RU-EN-RU menus/status/confirm, stale navigation, timeout, unknown locale, confirmation guards; no auth adapter");
+        Console.WriteLine("PASS actual CityWindow methods/hooks on no-window doubles: origin/retained-core/ready-epoch checks, RU-EN-RU menus/status, clean/dirty/busy/cancel/discard close, no native dialog or background prompt, stale navigation, timeout, unknown locale, confirmation guards; no auth adapter");
         return 0;
     }
 }
