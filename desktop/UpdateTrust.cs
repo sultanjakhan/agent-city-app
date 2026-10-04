@@ -1,0 +1,17 @@
+namespace AgentCityDesktop;
+internal static class UpdateTrust
+{
+    public const string PublicKeyPem = """
+-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAxY/bA9oD6JD9GUsuczWJ
+WCxzCAITxzGicPidX5MFMrO/TJBaptTdFD8AWuMTNSQTbECUw59YAu/ueczC0RTl
+8kim7SDwuBujfH/dZQQTK/QIyzhy07JDYlvoQUYbtEK06Z5aB3yIvw8qpvbK7tLt
+DU+aXZdL/OWDDIAz56KgkwBAy/KvR92U+gKM+g58gbEb4m1Bc6lVVIqRsasgrzSI
+/aJDlSMwwpTK45f4Vv8Tf3MI3XWSc7sHcNe7oyTtnOb+5j0NQBhV+hcXx25IKyjk
+ecxyMprIZ+JtrE5vUpdzfqlafTS+Q5hymm3/ZSzIEPWPszpVmFeP0cDUfANiqqb2
+Dn5q7f5oIglr2nB83kBTQm4XL74K7WC7roTZi2kK7PADlSMI0sUVEkv5zE1K5El5
+ELMARkaFHcdAU1VFY62voNJ9uNA2lRhYRcS2S+yCSPuPjB8ENlNOwFC7MS6MuHOZ
+8xWKUq+momkbRIYoZxj6Sc2nJRhvD4Z+/fYOYP0gXqOVAgMBAAE=
+-----END PUBLIC KEY-----
+""";
+}

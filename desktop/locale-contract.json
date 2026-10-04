@@ -1,0 +1,30 @@
+{
+  "status": "HOST_WIRED_SOURCE_HEADLESS_TESTED_NATIVE_ACCEPTANCE_NOTRUN",
+  "source": "Existing static/i18n.js I18n.language, initialized from agentcity-language localStorage; existing app normalization en-or-ru remains authoritative.",
+  "existing_transport": "CoreWebView2.ExecuteScriptAsync, already used by host recovery; no new WebMessage, host object, backend command, endpoint or config setting.",
+  "new_internal_read_contract": "Fixed DesktopLocale.SnapshotScript reads only {version:1,language:ru|en}, or null before I18n exists. No secret/storage reads in host.",
+  "scope": "CityWindow UI thread. IsCurrentLocaleDocument requires retained CoreWebView2 reference, non-disposed window/view, non-closing state, successful matching top-level navigation, exact WirePolicy origin and current/completed documentEpoch. It is checked before/after read and by CopyFor. New-document SourceChanged and failed navigation explicitly invalidate accepted locale and in-flight sequence even at the same pending epoch. Fragment/history SourceChanged can retain readiness only for an already successful document.",
+  "availability": "Unknown before the current document provides a valid response. Do not derive a language from private profile, OS culture or previous origin. Invalid/unavailable read preserves the last valid value for the same document only.",
+  "fallback": "No host language is selected before a valid snapshot. NativeText uses the existing legacy RU copy when guarded CopyFor is unavailable; this is explicitly unlocalized presentation, not private-profile/OS inference. Invalid snapshot preserves a last valid language only within the same guarded document.",
+  "persistence_limit": "Host creates a fresh temporary browser profile and a process-specific origin. Availability of language saved in another browser/profile or previous host launch is not established; do not claim cross-launch persistence.",
+  "integration_remaining": [
+    "Native acceptance for actual WebView2 script visibility, saved RU/EN and live switching, menu/status accessible names and fit/focus, restart/close confirmations, recovery/revoke/backend loss, stale navigation and teardown. No GUI execution occurred.",
+    "Pre-document Program profile/mode-conflict dialogs remain legacy RU: no existing app locale is available in those processes. Cross-launch locale persistence is not established; no new data/settings contract was added."
+  ],
+  "tests": [
+    "tests/desktop-locale.test.cjs",
+    "tests/native-copy-contract.ps1 -Contract Host",
+    "tests/native-copy-contract.ps1 -Contract Locale",
+    "tests/native-copy-contract.ps1 -Contract Copy"
+  ],
+  "unchanged": [
+    "PrivateBridge/WirePolicy",
+    "auth/recovery and backend commands",
+    "backend runtime modes",
+    "data/config files",
+    "web locale/settings/source",
+    "installed application"
+  ],
+  "refresh": "Successful NavigationCompleted, menu DropDownOpening, before restart/close confirmation, and a separate 1-second UI-only timer skipped during busy auth/runtime actions. In-flight reads are shared; stale-document reads cannot commit, and new current-document reads are attempted after an older read drains. Reads use a 2-second deadline and never call the backend or bootstrap. UI timer skips an in-flight read; menu/confirmation reads share it. A read from an older epoch drains before a new current-document read. Pending confirmation disables native action items and rechecks disposal/busy/closing before presentation.",
+  "native_keys": 16
+}

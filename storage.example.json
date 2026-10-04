@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "dataRoot": "../agent-city-data",
+  "repositoryRoots": ["../agent-city-data/repositories"],
+  "cicadaSources": []
+}

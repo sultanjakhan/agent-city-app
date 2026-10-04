@@ -1,0 +1,20 @@
+const {test,expect}=require('./owner-fixture.cjs');
+test('policy persists and exposes conflicts without grants',async({page})=>{
+ await page.goto('/#repos');await expect(page.locator('.library-row').first()).toBeVisible();
+ await page.locator('.repo-row').first().locator('button').click();
+ await page.locator('#project-policy-editor summary').click();
+ await page.locator('#project-policy-instructions').fill('Synthetic shared instructions');
+ await page.locator('#project-policy-sources').fill('docs');
+ await page.locator('#project-policy-allowed').fill('read\nwrite');
+ await page.locator('#project-policy-denied').fill('write');
+ await page.locator('#project-policy-pipeline-preview').fill('{"allowedActions":["read","publish"],"sourceIds":["docs","secret"]}');
+ await page.locator('#preview-project-policy').click();
+ await expect(page.locator('#project-policy-preview')).toContainText('publish');
+ await expect(page.locator('#project-policy-preview')).toContainText('"runtimeEnforced": false');
+ await page.screenshot({path:'test-results/project-policy-preview.png',fullPage:true});
+ await page.locator('#save-repo-profile').click();await expect(page.locator('#repo-message')).not.toBeEmpty();
+ await page.reload();await page.locator('.repo-row').first().locator('button').click();
+ await expect(page.locator('#project-policy-instructions')).toHaveValue('Synthetic shared instructions');
+ await expect(page.locator('#project-policy-pipeline')).toHaveValue('');
+ await expect(page.locator('#project-policy-pipeline-preview')).toHaveValue('');
+});

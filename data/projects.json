@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "projects": [
+    {
+      "id": "example-project",
+      "name": "Example project",
+      "description": {"ru": "Демонстрационный проект без личных данных.", "en": "Synthetic project without personal data."},
+      "useCases": [{"ru": "Проверка библиотеки проектов.", "en": "Explore the project library."}],
+      "category": "other",
+      "repoUrl": "https://github.com/example/example-project",
+      "docsUrl": "https://example.invalid/docs",
+      "status": "reference"
+    }
+  ]
+}

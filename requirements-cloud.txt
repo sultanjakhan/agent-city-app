@@ -1,0 +1,3 @@
+# Optional encrypted device synchronization. Base panel still uses the standard library.
+cryptography>=46,<47
+keyring>=25.7,<26; sys_platform == "darwin"

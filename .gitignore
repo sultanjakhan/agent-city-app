@@ -1,0 +1,40 @@
+# Private connection pointer and local environments
+storage.local.json
+connection.local.json
+.local/
+.env
+.env.*
+!.env.example
+*.dpapi
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.*
+secrets.*
+# Runtime data never belongs in this repository
+local/
+private/
+keys/
+profiles/
+sessions/
+backups/
+exports/
+logs/
+*.db
+*.db-*
+*.sqlite*
+*.jsonl
+*.log
+# Generated checks and dependencies
+__pycache__/
+*.py[cod]
+node_modules/
+test-results/
+playwright-report/
+.playwright-mcp/
+.venv/
+
+# Isolated desktop host build intermediates
+desktop/bin/
+desktop/obj/
