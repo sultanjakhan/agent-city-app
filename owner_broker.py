@@ -10,7 +10,8 @@ import threading
 import uuid
 import time
 from owner_transport import write_pipe, remaining, ControlDeadline, spawn_owned
-MAX_MESSAGE=16384
+MAX_MESSAGE=256*1024
+CONTROL_MESSAGE=16384
 RECOVERY_SECONDS=30  # Total revoke/bootstrap plus cold native handoff; not a user preference.
 
 def script_command(root, script, args):
@@ -66,8 +67,9 @@ class OwnerBroker:
         try:
             if self.channel_failed or not self.child or self.child.poll() is not None:raise BrokerError('owned child unavailable')
             ident=uuid.uuid4().hex;next_sequence=self.sequence+1;message={'version':1,'id':ident,'sequence':next_sequence,'action':action,'args':args or {}}
-            raw=json.dumps(message,separators=(',',':'),allow_nan=False).encode()+b'\n'
-            if len(raw)>MAX_MESSAGE:raise BrokerError('control message limit')
+            raw=json.dumps(message,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()+b'\n'
+            limit=MAX_MESSAGE if action in ('delegate', 'agent-request') else CONTROL_MESSAGE
+            if len(raw)>limit:raise BrokerError('control message limit')
             try:
                 write_pipe(self.child.stdin,raw,deadline);self.sequence=next_sequence;reply=self.responses.get(timeout=remaining(deadline))
             except (OSError,queue.Empty,ControlDeadline):

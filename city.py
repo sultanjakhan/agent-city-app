@@ -30,7 +30,7 @@ def native_request(path, body=None):
         raise OSError('native host unavailable')
     frame = json.dumps({'method': 'GET' if body is None else 'POST', 'path': path, 'body': body},
                        ensure_ascii=False, allow_nan=False).encode() + b'\n'
-    if len(frame) >= 16000:
+    if len(frame) > 64 * 1024:
         raise ValueError('native request too large')
     result = subprocess.run([str(host), '--agent-request-stdin', str(pointer)], input=frame,
                             capture_output=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -46,13 +46,13 @@ def delegated_stdin():
     # The capability travels only in the trusted parent's inherited stdin pipe.
     from owner_session import CAPABILITY
     try:
-        raw=sys.stdin.buffer.read(16385)
-        if len(raw)>16384:raise ValueError()
+        raw=sys.stdin.buffer.read(256 * 1024 + 1)
+        if len(raw)>256 * 1024:raise ValueError()
         message=json.loads(raw)
         if not isinstance(message,dict) or set(message)!={'version','port','ownerHost','method','path','body','grant'} or message['version']!=1 or type(message['port']) is not int or not 1<=message['port']<=65535 or not isinstance(message['ownerHost'],str) or not re.fullmatch(r'agent-city-[a-f0-9]{32}\.localhost',message['ownerHost']) or not isinstance(message['grant'],str) or not CAPABILITY.fullmatch(message['grant']) or message['method'] not in ('GET','POST') or not isinstance(message['path'],str):raise ValueError()
         owner=message['ownerHost']+':'+str(message['port'])
         headers={'Host':owner,'Origin':'http://'+owner,'X-Agent-City':'1','X-Agent-City-Grant':message['grant'],'Content-Type':'application/json'}
-        data=json.dumps(message['body'],allow_nan=False).encode() if message['method']=='POST' else None
+        data=json.dumps(message['body'],ensure_ascii=False,allow_nan=False).encode() if message['method']=='POST' else None
         request=Request('http://127.0.0.1:'+str(message['port'])+message['path'],data=data,headers=headers,method=message['method'])
         with build_opener(ProxyHandler({}),_NoRedirect()).open(request,timeout=10) as response:raw=response.read(8*1024*1024+1)
         if len(raw)>8*1024*1024:raise ValueError()
