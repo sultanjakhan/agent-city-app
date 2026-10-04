@@ -4,15 +4,16 @@ let providerSaving=false,providerRemoving=null,providerDraft='',providerAddedId=
 function adoptProviderState(snapshot){providerStateEpoch++;state=snapshot;render();}
 async function providerRequest(path,body){
  const controller=new AbortController(),deadline=setTimeout(()=>controller.abort(),15000);
+ const draft=body?window.agentCityDrafts?.begin(path,body):null;let saved=false;
  try{
   const response=await fetch(path,{signal:controller.signal,...(body?{method:'POST',headers:{'Content-Type':'application/json','X-Agent-City':'1','X-Agent-City-Token':state?.csrfToken||''},body:JSON.stringify(body)}:{})});
   const data=await response.json();
   if(!response.ok){const error=Error(data.error||t('Не удалось выполнить запрос'));error.status=response.status;throw error;}
-  return data;
+  saved=true;return data;
  }catch(error){
   if(!error.status)throw Error(t('Ответ не получен. Перед повтором проверь список: изменение могло сохраниться.'));
   throw error;
- }finally{clearTimeout(deadline);}
+ }finally{clearTimeout(deadline);window.agentCityDrafts?.end(draft,saved);}
 }
 function providerBusy(value){
  providerSaving=value;
@@ -46,7 +47,7 @@ $('provider-form').addEventListener('submit',async e=>{
    providerDraft=$('provider-website').value;
    if(key){providerAddedId=resolution.id;$('provider-website').readOnly=true;}
   }
-  if(key){savingKey=true;keyAction='provider-add';const snapshot=await providerRequest('/api/credential',{provider:providerAddedId,action:'save',key});$('provider-api-key').value='';adoptProviderState(snapshot);}
+  if(key){savingKey=true;keyAction='provider-add';$('provider-api-key').dataset.draftProvider=providerAddedId;const snapshot=await providerRequest('/api/credential',{provider:providerAddedId,action:'save',key});$('provider-api-key').value='';window.agentCityDrafts?.reset($('provider-api-key'));adoptProviderState(snapshot);}
   $('provider-dialog').close();render();toast('Провайдер сохранён.');
  }catch(error){
   $('provider-error').textContent=savingKey?t(error.status?'Провайдер сохранён, но ключ не сохранён. Повтори сохранение ключа или закрой окно; провайдер останется в списке.':'Сохранение ключа не подтверждено. Провайдер остаётся в списке. Перед повтором проверь его состояние.'):t(error.message);

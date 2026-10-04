@@ -55,7 +55,7 @@ def server_for(gateway,host='127.0.0.1',port=0):
             try:
                 if self.path!='/commands' or self.headers.get('Content-Type')!='application/json':raise TaskError('invalid_api_route',404)
                 count=int(self.headers.get('Content-Length','0'))
-                if not 0<count<16000:raise TaskError('api_frame_limit',413)
+                if not 0<count<64*1024:raise TaskError('api_frame_limit',413)
                 value=gateway.dispatch(self.headers.get('Authorization'),strict(self.rfile.read(count)))
             except TaskError as e:status=e.status;value={'isError':True,'status':status,'code':e.code,'current':e.current}
             except Exception:status=503;value={'isError':True,'status':503,'code':'application_unavailable_or_outcome_unknown'}

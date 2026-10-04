@@ -67,7 +67,7 @@ class OwnerBroker:
             if self.channel_failed or not self.child or self.child.poll() is not None:raise BrokerError('owned child unavailable')
             ident=uuid.uuid4().hex;next_sequence=self.sequence+1;message={'version':1,'id':ident,'sequence':next_sequence,'action':action,'args':args or {}}
             raw=json.dumps(message,separators=(',',':'),allow_nan=False).encode()+b'\n'
-            if len(raw)>MAX_MESSAGE:raise BrokerError('control message limit')
+            if len(raw)>(64*1024 if action=='delegate' else MAX_MESSAGE):raise BrokerError('control message limit')
             try:
                 write_pipe(self.child.stdin,raw,deadline);self.sequence=next_sequence;reply=self.responses.get(timeout=remaining(deadline))
             except (OSError,queue.Empty,ControlDeadline):

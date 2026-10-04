@@ -15,11 +15,11 @@ def definitions(config):
              'inputSchema':{'type':'object','properties':{'operationId':{'type':'string','pattern':'^[A-Za-z0-9_-]{8,100}$'},'command':{'type':'string','enum':[c for c,s in COMMAND_SCOPE.items() if s in config['scopes']]},'arguments':{'type':'object'}},'required':['operationId','command','arguments'],'additionalProperties':False}}]
 def serve(connection,source=sys.stdin.buffer,sink=sys.stdout.buffer):
     while True:
-        raw=source.readline(16001)
+        raw=source.readline(64*1024+1)
         if not raw:return
         ident=None
         try:
-            if len(raw)>16000:raise TaskError('mcp_frame_limit')
+            if len(raw)>64*1024:raise TaskError('mcp_frame_limit')
             request=strict(raw);ident=request.get('id');method=request['method'];params=request.get('params',{})
             if method.startswith('notifications/'):continue
             if method=='initialize':result={'protocolVersion':params.get('protocolVersion','2025-03-26'),'capabilities':{'tools':{}},'serverInfo':{'name':'shared-task-command-access','version':'1.0.0'}}

@@ -89,11 +89,38 @@ class DashboardHttpTests(unittest.TestCase):
         second = copy.deepcopy(first)
         second['source']['sourceKey'] = 'aaaaaaaaaaaaaaaa'
         second['tasks'][0]['title'] = 'Other profile private title'
-        with patch.object(self.store.cicada, 'snapshot', side_effect=[first, second]):
+        with patch.object(self.store.cicada, 'snapshot', side_effect=[first, second, second]):
             value = self.store.dashboard()
         self.assertEqual(value['cicada']['historyStatus'], 'source_changed')
         self.assertEqual(value['cicada']['historyTasks'], [])
+        self.assertEqual(value['cicada']['availableTasks'], [])
+        self.assertEqual(value['cicada']['availableStatus'], 'source_changed')
         self.assertNotIn('Other profile private title', json.dumps(value))
+
+    def test_idle_personal_tasks_are_live_native_rows_not_report_seeds(self):
+        with closing(sqlite3.connect(self.db)) as db, db:
+            db.execute("DELETE FROM timeline_blocks")
+            db.execute("UPDATE items SET tags='task-sphere:personal',date=NULL,time=NULL")
+        first = self.store.dashboard()['cicada']
+        self.assertEqual(first['tasks'], [])
+        self.assertEqual([t['sourceId'] for t in first['availableTasks']], ['task-1'])
+        with closing(sqlite3.connect(self.db)) as db, db:
+            db.execute("UPDATE items SET title='Edited in Cicada',tags='task-sphere:personal,task-stage:acceptance',version=version+1")
+            db.execute("INSERT INTO items(id,kind,title,completed,version,archived,tags,status) VALUES('new-native','task','Created in Cicada',0,1,0,'task-sphere:personal','task')")
+        before = self.db.read_bytes()
+        second = {t['sourceId']:t for t in self.store.dashboard()['cicada']['availableTasks']}
+        self.assertEqual(second['task-1']['taskKey'], first['availableTasks'][0]['taskKey'])
+        self.assertEqual(second['task-1']['title'], 'Edited in Cicada')
+        self.assertEqual(second['task-1']['stage'], 'acceptance')
+        self.assertEqual(second['task-1']['version'], 2)
+        self.assertIn('new-native', second)
+        self.assertEqual(before, self.db.read_bytes())
+
+    def test_personal_list_rejects_mixed_work_jira_completed_and_archived_tasks(self):
+        with closing(sqlite3.connect(self.db)) as db, db:
+            for ident,tags,completed,archived in [('personal',' task-sphere:personal ',0,0),('mixed','task-sphere:personal, task-sphere:work',0,0),('jira','task-sphere:personal,JIRA:remote',0,0),('done','task-sphere:personal',1,0),('archived','task-sphere:personal',0,1),('unspecified','',0,0)]:
+                db.execute("INSERT INTO items(id,kind,title,completed,version,archived,tags,status) VALUES(?,'task',?, ?,1,?,?, 'task')",(ident,ident,completed,archived,tags))
+        self.assertEqual([t['sourceId'] for t in self.store.dashboard()['cicada']['availableTasks']], ['personal'])
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

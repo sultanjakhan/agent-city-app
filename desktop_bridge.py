@@ -7,7 +7,7 @@ import sys
 import time
 from owner_broker import OwnerBroker
 
-MAX_MESSAGE = 16384
+MAX_MESSAGE = 64 * 1024
 MAX_REPLY = 1024 * 1024
 
 
@@ -33,6 +33,8 @@ def request(raw, expected):
         raise ValueError("sequence")
     if type(value["draftsClosed"]) is not bool or value["action"] not in ("bootstrap", "revoke", "stop", "restart", "status", "agent-request"):
         raise ValueError("action")
+    if value["action"] != "agent-request" and len(raw) > 16384:
+        raise ValueError("frame")
     if value["action"] in ("stop", "restart") and value["draftsClosed"] is not True:
         raise ValueError("explicit draft closure required")
     return value

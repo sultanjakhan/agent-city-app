@@ -19,14 +19,14 @@ internal static class NativeCopyContract
                 if (ch >= '\u0400' && ch <= '\u04ff') throw new Exception("Russian copy in English lookup");
             count++;
         }
-        if (count != 20) throw new Exception("Unexpected native copy key coverage");
+        if (count != 23) throw new Exception("Unexpected native copy key coverage");
         foreach (var locale in new[] { "ru", "en" })
         {
             try { DesktopText.ForLanguage("invalid", locale); }
             catch (ArgumentException) { continue; }
             throw new Exception("Unknown copy key did not fail explicitly");
         }
-        Console.WriteLine("PASS native copy contract: 20 RU/EN keys, unchanged RU fallback, unknown-key rejection; host routing NOT tested");
+        Console.WriteLine("PASS native copy contract: 23 RU/EN keys, unchanged RU fallback, unknown-key rejection; host routing NOT tested");
         return 0;
     }
 }

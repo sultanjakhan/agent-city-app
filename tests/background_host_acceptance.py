@@ -39,6 +39,7 @@ def main():
         assert win32process.GetExitCodeProcess(p)==expected
     try:
         argv=['--background','--local-only','--config',str(config)]
+        foreground=win32gui.GetForegroundWindow()
         first,pid=launch(argv);bridge=Bridge('agent-city',config,args.client)
         deadline=time.monotonic()+40
         while True:
@@ -55,7 +56,17 @@ def main():
         repeated,_=launch(argv);finished(repeated,0);minimized()
         mismatch,_=launch(['--background','--config',str(config)]);finished(mismatch,3);minimized()
         invalid,_=launch(['--background','--config',str(root/'absent.json')]);finished(invalid,2)
-        result={'nativeBackgroundStart':True,'minimized':True,'mcpReadSucceeded':True,'repeatedLaunchDidNotRestoreWindow':True,'modeMismatchRejectedWithoutDialog':True,'invalidProfileRejectedWithoutDialog':True,'syntheticOnly':True,'inactiveDesktop':True}
+        # Close only this synthetic host, on its inactive desktop. No owner
+        # window or dialog is clicked; the normal WM_CLOSE path must drain.
+        time.sleep(3)
+        windows=[int(w) for w in desktop.EnumDesktopWindows() if win32process.GetWindowThreadProcessId(int(w))[1]==pid and win32gui.GetWindowText(int(w))=='Agent City']
+        assert len(windows)==1
+        win32gui.PostMessage(windows[0],win32con.WM_CLOSE,0,0)
+        import win32event
+        assert win32event.WaitForSingleObject(first,35000)==win32con.WAIT_OBJECT_0,'clean close blocked or raised a dialog'
+        assert win32process.GetExitCodeProcess(first)==0
+        assert win32gui.GetForegroundWindow()==foreground,'background commands or close changed foreground'
+        result={'nativeBackgroundStart':True,'minimized':True,'mcpReadSucceeded':True,'repeatedLaunchDidNotRestoreWindow':True,'modeMismatchRejectedWithoutDialog':True,'invalidProfileRejectedWithoutDialog':True,'cleanCloseWithoutDialog':True,'gracefulExitCode':0,'foregroundUnchanged':True,'syntheticOnly':True,'inactiveDesktop':True}
         (root/'acceptance.json').write_text(json.dumps(result,indent=2),encoding='utf-8');print(json.dumps(result))
     finally:
         win32job.TerminateJobObject(job,0)

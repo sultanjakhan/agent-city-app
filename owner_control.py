@@ -8,6 +8,7 @@ import sys
 import threading
 from pathlib import Path
 MAX_MESSAGE=16384
+MAX_REQUEST=64*1024
 
 def start_control(server,instance):
     if not isinstance(instance,str) or not re.fullmatch('[a-f0-9]{32}',instance) or not stat.S_ISFIFO(os.fstat(sys.stdin.fileno()).st_mode):
@@ -21,13 +22,14 @@ def start_control(server,instance):
         sequence=0;last_digest=None;last_reply=None
         try:
             while True:
-                raw=sys.stdin.buffer.readline(MAX_MESSAGE+1)
+                raw=sys.stdin.buffer.readline(MAX_REQUEST+1)
                 if not raw:break
                 ident=None
                 try:
-                    if len(raw)>MAX_MESSAGE or not raw.endswith(b'\n'):raise ValueError()
+                    if len(raw)>MAX_REQUEST or not raw.endswith(b'\n'):raise ValueError()
                     message=json.loads(raw)
                     if not isinstance(message,dict) or set(message)!={'version','id','sequence','action','args'} or message['version']!=1 or not isinstance(message['id'],str) or not re.fullmatch('[a-f0-9]{32}',message['id']) or not isinstance(message['args'],dict) or type(message['sequence']) is not int:raise ValueError()
+                    if message['action']!='delegate' and len(raw)>MAX_MESSAGE:raise ValueError()
                     ident=message['id'];digest=hashlib.sha256(raw).digest()
                     if message['sequence']==sequence and digest==last_digest and last_reply is not None:send(last_reply);continue
                     if message['sequence']!=sequence+1:raise ValueError()
