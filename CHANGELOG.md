@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.25
+
+- Allow Russian task results to reach Cicada through a 64 KiB task-request
+  budget and a 256 KiB trusted internal envelope. Ordinary control limits and
+  access checks remain unchanged.
+- Stop oversized frames before their remaining bytes can become another request.
+- Keep native pipe and MCP helpers aligned with the task-request budget.
+
 ## 0.5.23
 
 - Include the application's MIT license in the signed Windows package.
