@@ -46,11 +46,11 @@ internal sealed class PrivateBridge
     public bool Retired { get; private set; }
     public bool Exited => process != null && process.HasExited;
     public bool CanControl => process != null && !Exited && !Retired;
-    private static async Task<JsonElement> ReadFrame(StreamReader stream, CancellationToken ct)
+    private static async Task<JsonElement> ReadFrame(StreamReader stream, CancellationToken ct, int maximum = 16384)
     {
         var text = new StringBuilder();
         var one = new char[1];
-        while (text.Length < 16384)
+        while (text.Length < maximum)
         {
             if (await stream.ReadAsync(one.AsMemory(), ct) == 0) throw new EndOfStreamException();
             if (one[0] == '\n')
@@ -86,7 +86,7 @@ internal sealed class PrivateBridge
         }
         catch { Retire(); throw; }
     }
-    public async Task<JsonElement> Command(string action, bool draftsClosed = false, int timeoutSeconds = 35)
+    public async Task<JsonElement> Command(string action, bool draftsClosed = false, int timeoutSeconds = 35, JsonElement? agentRequest = null)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
         await gate.WaitAsync(timeout.Token);
@@ -94,10 +94,13 @@ internal sealed class PrivateBridge
         {
             if (!CanControl) throw new InvalidOperationException("Private control unavailable");
             var id = ++sequence;
-            var frame = JsonSerializer.Serialize(new { version = 1, id, action, draftsClosed });
+            var frame = agentRequest is null
+                ? JsonSerializer.Serialize(new { version = 1, id, action, draftsClosed })
+                : JsonSerializer.Serialize(new { version = 1, id, action, draftsClosed, request = agentRequest });
+            if (Encoding.UTF8.GetByteCount(frame) >= 16384) throw new InvalidDataException("Private frame limit");
             await process!.StandardInput.WriteLineAsync(frame.AsMemory(), timeout.Token);
             await process.StandardInput.FlushAsync(timeout.Token);
-            var reply = await ReadFrame(process.StandardOutput, timeout.Token);
+            var reply = await ReadFrame(process.StandardOutput, timeout.Token, action == "agent-request" ? 1024 * 1024 : 16384);
             if (reply.GetProperty("version").GetInt32() != 1 || reply.GetProperty("id").GetInt32() != id ||
                 !reply.GetProperty("ok").GetBoolean()) throw new InvalidDataException("Private operation refused");
             var result = reply.GetProperty("result");
@@ -137,6 +140,7 @@ internal sealed class CityWindow : Form
     private bool updateBusy;
 
     private PrivateBridge bridge = new();
+    private AgentPipe? agentPipe;
     private CoreWebView2Environment? environment;
     private string? browserProfile;
     private bool browserExited, busy, closing, approvedClose, loaded, healthBusy;
@@ -153,9 +157,13 @@ internal sealed class CityWindow : Form
     private string statusKey = nameof(DesktopText.Starting);
     private readonly BackendHealth backendHealth = new();
     private readonly System.Windows.Forms.Timer health = new() { Interval = 1000 };
-    public CityWindow(string config, bool localOnly)
+    private readonly bool backgroundStart;
+    protected override bool ShowWithoutActivation => backgroundStart;
+    public CityWindow(string config, bool localOnly, bool backgroundStart = false)
     {
         this.config = config; this.localOnly = localOnly;
+        this.backgroundStart = backgroundStart;
+        if (backgroundStart) WindowState = FormWindowState.Minimized;
         Text = "Agent City";
         using (var iconStream = typeof(CityWindow).Assembly.GetManifestResourceStream("AgentCity.Icon")!)
             Icon = new Icon(iconStream);
@@ -372,6 +380,12 @@ internal sealed class CityWindow : Form
     }
     private async Task Initialize()
     {
+        // Agent access is owned by the host broker and remains independent of
+        // renderer startup. A slow/unavailable WebView must not block reporting.
+        await bridge.Start(config, localOnly);
+        agentPipe = new AgentPipe(AgentPipe.Name(config), async request =>
+            await bridge.Command("agent-request", agentRequest: request));
+        agentPipe.Start();
         // Runtime only; no download/installer or system setting changes at launch.
         _ = CoreWebView2Environment.GetAvailableBrowserVersionString();
         browserProfile = Path.Combine(Path.GetTempPath(), "agentcity-desktop-browser-" + Guid.NewGuid().ToString("N"));
@@ -413,7 +427,6 @@ internal sealed class CityWindow : Form
                 e.Response = environment.CreateWebResourceResponse(new MemoryStream(), 403, "Blocked", "Content-Type: text/plain");
         };
         core.ProcessFailed += (_, _) => SetStatus(nameof(DesktopText.RendererUnavailable));
-        await bridge.Start(config, localOnly);
         await Bootstrap(true); health.Start(); localeRefresh.Start();
     }
     private async Task Navigate(string url)
@@ -475,11 +488,13 @@ internal sealed class CityWindow : Form
         e.Cancel = true;
         if (busy || closing || (loaded && !await ConfirmDrafts(nameof(DesktopText.CloseQuestion)))) return;
         closing = true; recover.Enabled = restart.Enabled = revoke.Enabled = false;
+        agentPipe?.Dispose(); agentPipe = null;
         try
         {
             if (bridge.CanControl) await bridge.Command("stop", true);
             else bridge.Retire();
             await bridge.WaitForExit();
+            await StorageMigration.ApplyPrepared(config);
             health.Stop(); localeRefresh.Stop(); browserExited = false; view.Dispose();
             var until = DateTime.UtcNow.AddSeconds(10);
             while (environment != null && !browserExited && DateTime.UtcNow < until) await Task.Delay(50);
@@ -547,6 +562,8 @@ internal static class Program
         {
             if (InstancePolicy.Signal(syntheticScope, "synthetic-config", true) || signal.WaitOne(0)) return 2;
             if (InstancePolicy.Signal(syntheticScope, "other-config", false) || signal.WaitOne(0)) return 2;
+            if (!InstancePolicy.Signal(syntheticScope, "synthetic-config", false, false) || signal.WaitOne(0)) return 2;
+            if (InstancePolicy.Signal(syntheticScope, "synthetic-config", true, false) || signal.WaitOne(0)) return 2;
             if (!InstancePolicy.Signal(syntheticScope, "synthetic-config", false) || !signal.WaitOne(100)) return 2;
         }
         var directory = Path.Combine(Path.GetTempPath(), "agentcity-desktop-policy-test-" + Guid.NewGuid().ToString("N"));
@@ -573,9 +590,17 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.SequenceEqual(new[] { "--self-test" })) return SelfTest();
+        if (args.Length == 2 && args[0] == "--profile-check")
+        {
+            try { _ = ProfileIdentity.Load(args[1]); Console.WriteLine("{\"ok\":true,\"profileValid\":true,\"appStarted\":false}"); return 0; }
+            catch (Exception error) { Console.WriteLine(JsonSerializer.Serialize(new { ok = false, error = error is InvalidDataException ? error.Message : error.GetType().Name, appStarted = false })); return 2; }
+        }
         if (args.Length == 2 && args[0] == "--apply-update") return UpdateInstall.RunHelper(args[1], UpdateTrust.PublicKeyPem);
+        if (args.Length == 2 && args[0] == "--agent-request-stdin") return AgentPipe.Client(args[1]).GetAwaiter().GetResult();
+        if (args.Length == 1 && args[0] == "--agent-pipe-self-test") return AgentPipe.SelfTest().GetAwaiter().GetResult();
         bool localOnly = args.Contains("--local-only");
-        args = args.Where(a => a != "--local-only").ToArray();
+        bool background = args.Contains("--background");
+        args = args.Where(a => a != "--local-only" && a != "--background").ToArray();
         string config;
         ProfileIdentity profile;
         try
@@ -589,7 +614,7 @@ internal static class Program
             else throw new InvalidDataException();
             profile = ProfileIdentity.Load(config);
         }
-        catch { MessageBox.Show("\u041f\u0440\u043e\u0444\u0438\u043b\u044c \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d. \u0423\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u0434\u043e\u043b\u0436\u043d\u0430 \u044f\u0432\u043d\u043e \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0438\u0439 storage config; \u043d\u043e\u0432\u0430\u044f \u043f\u0430\u043f\u043a\u0430 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u043d\u0435 \u0441\u043e\u0437\u0434\u0430\u0451\u0442\u0441\u044f.", "Agent City"); return 2; }
+        catch { if (background) { Console.Error.WriteLine("Agent City profile unavailable"); return 2; } MessageBox.Show("\u041f\u0440\u043e\u0444\u0438\u043b\u044c \u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d. \u0423\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u0434\u043e\u043b\u0436\u043d\u0430 \u044f\u0432\u043d\u043e \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0438\u0439 storage config; \u043d\u043e\u0432\u0430\u044f \u043f\u0430\u043f\u043a\u0430 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u043d\u0435 \u0441\u043e\u0437\u0434\u0430\u0451\u0442\u0441\u044f.", "Agent City"); return 2; }
         var user = WindowsIdentity.GetCurrent().User?.Value ?? throw new InvalidOperationException();
         var scope = WirePolicy.Scope(profile.PanelIdentity, user);
         var configScope = WirePolicy.Scope(profile.ConfigIdentity, user);
@@ -601,9 +626,10 @@ internal static class Program
             var until = Stopwatch.StartNew();
             do
             {
-                if (InstancePolicy.Signal(scope, configScope, localOnly)) return 0;
+                if (InstancePolicy.Signal(scope, configScope, localOnly, !background)) return 0;
                 Thread.Sleep(20);
             } while (until.Elapsed < TimeSpan.FromMilliseconds(500));
+            if (background) return 3;
             MessageBox.Show(DesktopText.RuntimeMismatch, "Agent City");
             return 3; // No silent cross-mode/profile focus and no second backend.
         }
@@ -611,7 +637,7 @@ internal static class Program
         {
             using var focus = new EventWaitHandle(false, EventResetMode.AutoReset, InstancePolicy.FocusName(scope, configScope, localOnly));
             ApplicationConfiguration.Initialize();
-            using var form = new CityWindow(config, localOnly);
+            using var form = new CityWindow(config, localOnly, background);
             var watcher = ThreadPool.RegisterWaitForSingleObject(focus, (_, _) =>
             {
                 if (form.IsHandleCreated && !form.IsDisposed) try { form.BeginInvoke(form.FocusOwnedWindow); } catch { }

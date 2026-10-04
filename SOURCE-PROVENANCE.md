@@ -24,3 +24,18 @@ keeping the same executable path, shortcut, settings and activity data.
 First installation on another computer, macOS, and recovery from power loss
 between directory renames have not been verified. A public-channel check of an
 already current version does not prove a future upgrade from GitHub.
+
+
+## 0.5.24
+
+The public source includes the final installed API/shared-task/background/UI
+checkpoint `dade11df42d048c578cc3c0485ced820442934b7` as a source snapshot,
+without importing its private Git history. Public documentation, licensing and
+the separate encrypted Cloudflare relay are retained.
+
+This release adds guarded, owner-requested data-folder relocation on normal
+close and native CLI access through the current-account pipe. Original data is
+retained; folders are never automatically merged or deleted. A live backend
+writer blocks relocation. Provider credentials and Cloudflare keys remain outside
+Git and release packages. macOS Keychain alias logic has unit coverage only;
+physical Mac acceptance remains separate.

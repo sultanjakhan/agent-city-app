@@ -92,7 +92,6 @@ body.nav-collapsed .compact-label { display: block; font-size: 11px; line-height
 .dashboard-task p { margin: 6px 0 0; }
 .task-stage { font-size: 15px; }
 .task-meta, .task-executor { color: var(--secondary); font-size: 13px; }
-.dashboard-note { margin: 24px 0 0; color: var(--secondary); font-size: 13px; max-width: 700px; }
 #dashboard-empty { margin-top: 24px; }
 #dashboard-task-dialog { width: min(720px,calc(100vw - 32px)); overflow-wrap: anywhere; }
 #dashboard-task-dialog header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
@@ -106,10 +105,7 @@ body.nav-collapsed .compact-label { display: block; font-size: 11px; line-height
 .run-metrics dd { margin: 0; }
 .run-history { padding-left: 22px; font-size: 14px; color: var(--secondary); }
 .stage-report { border-bottom: 1px solid var(--subtle); padding: 0; }
-.stage-report > summary { display: grid; grid-template-columns: 12px minmax(0,1fr) auto 12px; align-items: center; gap: 3px 12px; padding: 9px 0; cursor: pointer; list-style: none; }
-.stage-report > summary::-webkit-details-marker, .run-row > summary::-webkit-details-marker { display: none; }
-.stage-report > summary::after { content: '›'; color: var(--secondary); font-size: 20px; justify-self: end; grid-column: 4; grid-row: 1; transition: transform .12s; }
-.stage-report[open] > summary::after { transform: rotate(90deg); }
+.stage-report-heading { display: grid; grid-template-columns: 12px minmax(0,1fr) auto 12px; align-items: center; gap: 3px 12px; padding: 9px 0; list-style: none; }
 .stage-main, .stage-end { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .stage-main strong { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .stage-report-models { color: var(--secondary); font-size: 12px; overflow-wrap: anywhere; }
@@ -122,7 +118,6 @@ body.nav-collapsed .compact-label { display: block; font-size: 11px; line-height
 .stage-dot.error { background: #b05241; }
 .stage-dot.running { background: #337e76; box-shadow: 0 0 0 3px #e0efea; }
 .stage-dot.waiting { background: #a0782c; }
-.stage-report > summary:hover { background: var(--soft); }
 .stage-report .run-row { margin: 0 0 10px 24px; padding: 0 12px; background: var(--soft); border: 1px solid var(--subtle); border-radius: 8px; }
 .stage-resources { grid-column: 2 / 4; grid-row: 2; display: flex; flex-wrap: wrap; gap: 2px 12px; min-width: 0; font-size: 11px; line-height: 1.35; color: var(--secondary); }
 .stage-resources > span { overflow-wrap: anywhere; }
@@ -341,15 +336,11 @@ summary { cursor: pointer; font-size: 15px; }
 .report-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0; }
 .report-section-heading h3 { font-size: 14px; margin: 0; }
 .report-section-heading > span { font-size: 12px; color: var(--secondary); }
-.report-disclosure { border-bottom: 1px solid var(--subtle); padding: 0; }
-.report-disclosure > summary { padding: 12px 0; color: var(--secondary); font-size: 12px; }
+.report-section { border-bottom: 1px solid var(--subtle); padding: 0; }
+.report-section > h3 { padding: 12px 0; color: var(--secondary); font-size: 12px; }
 .report-hint { color: var(--secondary); font-size: 12px; line-height: 1.5; margin: 8px 0 12px; }
-.report-method { margin-bottom: 10px; }
-.report-method > summary { font-size: 12px; color: var(--secondary); }
 .run-row { padding: 0; border-top: 0; border-bottom: 1px solid var(--subtle); }
-.run-row > summary { display: flex; list-style: none; gap: 16px; padding: 12px 0; align-items: center; }
-.run-row > summary::before { content: '›'; color: var(--secondary); font-size: 18px; }
-.run-row[open] > summary::before { transform: rotate(90deg); }
+.run-row > .run-heading { display: flex; list-style: none; gap: 16px; padding: 12px 0; align-items: center; }
 .attempt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .attempt-main strong { font-size: 13px; font-weight: 600; }
 .attempt-subtitle, .attempt-state { font-size: 12px; color: var(--secondary); }
@@ -361,10 +352,6 @@ summary { cursor: pointer; font-size: 15px; }
 .run-row .attempt-provider { font-size: 12px; }
 .run-history { font-size: 12px; }
 .run-history li { padding: 3px 0; }
-#dashboard-unlinked { border: 1px solid var(--line); border-radius: 9px; margin-top: 16px; padding: 0 14px; }
-#dashboard-unlinked > summary { margin: 0; padding: 12px 0; font-size: 13px; font-weight: 500; color: var(--secondary); }
-#dashboard-unlinked .run-row:last-child { border-bottom: 0; }
-#dashboard-view .dashboard-note { font-size: 12px; margin-top: 16px; }
 @media(max-width: 520px) {
  #dashboard-task-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
  #dashboard-task-dialog > .dialog-header { padding: 16px 16px 10px; }
@@ -374,7 +361,7 @@ summary { cursor: pointer; font-size: 15px; }
  #dashboard-task-actions .text-button { padding: 8px 0; }
  .report-total { padding: 0 12px; }
  .report-total .report-total-value { font-size: 24px; }
- .stage-report > summary { column-gap: 8px; grid-template-columns: 8px minmax(0,1fr) minmax(72px,100px) 8px; }
+ .stage-report-heading { column-gap: 8px; grid-template-columns: 8px minmax(0,1fr) minmax(72px,100px) 8px; }
  .stage-main strong { font-size: 13px; }
  .stage-end { max-width: 100px; }
  .stage-report .run-row { margin-left: 0; }
@@ -444,7 +431,6 @@ summary { cursor: pointer; font-size: 15px; }
 #project-policy-editor textarea { min-height: 72px; resize: vertical; }
 #project-policy-preview { white-space: pre-wrap; overflow-wrap: anywhere; }
 
-#work-registry-preview-body{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto}.registry-task summary{cursor:pointer;font-weight:600}.registry-task p{overflow-wrap:anywhere}.registry-publisher{margin-top:20px}
 
 /* Shared neutral components; semantic status colors retain their existing roles. */
 :root[data-theme="dark"]{color-scheme:dark;--green-bg:#24412d;--yellow-bg:#493d24;--red-bg:#4c2b28}
@@ -456,3 +442,6 @@ input,select,textarea,dialog{background:var(--ui-surface);color:var(--ui-text)}
 #pipeline-editor input,#pipeline-editor select,#pipeline-editor textarea{background:var(--ui-surface);border-color:var(--ui-line);min-height:44px}
 #pipeline-editor label,#pipeline-editor p{color:var(--ui-secondary)}
 #pipeline-editor input:focus,#pipeline-editor select:focus,#pipeline-editor textarea:focus{outline-color:var(--ui-focus)}
+
+.registry-task p,.registry-task h4{overflow-wrap:anywhere}.registry-task h4{margin:0 0 12px;font-size:15px}.registry-publisher{margin-top:20px}
+#work-registry-preview-body{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto}

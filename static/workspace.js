@@ -17,9 +17,9 @@ function renderSettings(){
  selectSettingsTab(settingsTab);
 }
 function renderSettingsContent(){
- if(settingsTab==='connectors'){renderConnectors();return;}
+ if(settingsTab==='connectors'){renderConnectors();if(typeof renderTaskConnection==='function')renderTaskConnection();return;}
  if(settingsTab==='agents'){renderAgentConnection();renderAgentInfo();return;}
- if(settingsTab==='data'){renderDataInfo();renderDataSources();return;}
+ if(settingsTab==='data'){renderDataInfo();renderDataSources();if(typeof renderWorkRegistry==='function')renderWorkRegistry();return;}
  renderCatalogSettings();
 }
 function renderAgentInfo(){
@@ -30,6 +30,22 @@ function renderDataInfo(){
  const info=$('settings-data-info');info.replaceChildren();
  info.append(el('p','',`Agent City ${state.settings?.version||''}`,true),el('h3','','Хранилище устройства'),el('code','source-path',state.settings?.dataRoot||'',true),el('h3','','Библиотека навыков'),el('code','source-path',state.settings?.skillsRoot||'',true));
  if(state.settings?.libraryMode==='worktree')info.append(el('p','','Библиотека рабочей ветки. Для установленных агентов изменения нужно перенести в их подключённую библиотеку.'));
+ const storage=state.settings?.storage;
+ if(!storage?.supported)return;
+ info.append(el('h3','','Папка данных'),el('code','source-path',storage.root,true));
+ if(storage.state==='prepared'){
+  info.append(el('p','',`Перенос подготовлен: ${storage.destination}. Закрой Agent City обычным способом и открой снова. Исходная папка останется для восстановления.`,true));
+  const cancel=el('button','', 'Отменить перенос');cancel.type='button';
+  cancel.addEventListener('click',async()=>{try{await request('/api/storage/cancel',{revision:storage.revision});await load();}catch(error){toast(error.message);}});
+  info.append(cancel);return;
+ }
+ if(storage.state==='complete')info.append(el('p','','Перенос завершён. Исходная папка сохранена для восстановления.'));
+ if(storage.state==='error')info.append(el('p','',storage.error||'Перенос не завершён. Исходная папка сохранена.',true));
+ const label=el('label','','Новая пустая папка');const input=el('input');input.type='text';input.id='storage-destination';label.htmlFor=input.id;
+ input.autocomplete='off';input.spellcheck=false;
+ const save=el('button','','Подготовить перенос');save.type='button';
+ save.addEventListener('click',async()=>{save.disabled=true;try{await request('/api/storage/prepare',{destination:input.value,revision:storage.revision});await load();}catch(error){toast(error.message);}finally{save.disabled=false;}});
+ info.append(label,input,el('p','','Данные будут перенесены после обычного закрытия приложения. Выбери локальную пустую папку; исходные файлы сохранятся.'),save);
 }
 function renderCatalogSettings(){
  const list=$('catalog-sources');list.replaceChildren();

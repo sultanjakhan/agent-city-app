@@ -219,7 +219,7 @@ class CicadaConnector:
             namespace(value['sourceNamespace'])
             return {'sourceNamespace':value['sourceNamespace'], 'bindings':value['bindings']}
 
-    def authorize_binding(self, binding):
+    def authorize_binding(self, binding, *, personal_only=False):
         from work_exchange import validate_binding, ExchangeError
         validate_binding(binding)
         with self._lock:
@@ -231,8 +231,12 @@ class CicadaConnector:
             with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=1)) as db:
                 db.execute("PRAGMA query_only=ON"); db.execute("PRAGMA trusted_schema=OFF")
                 db.set_progress_handler(lambda: 1, 100000)
-                row = db.execute("SELECT 1 FROM items WHERE id=? AND kind='task' AND archived=0 LIMIT 1", (binding['sourceId'],)).fetchone()
+                row = db.execute("SELECT tags FROM items WHERE id=? AND kind='task' AND archived=0 LIMIT 1", (binding['sourceId'],)).fetchone()
                 if row is None: raise ExchangeError('missing_native_task')
+                if personal_only:
+                    tags = {part.strip().lower() for part in str(row[0]).split(',')}
+                    if 'task-sphere:personal' not in tags or 'task-sphere:work' in tags or any(tag.startswith(('jira','investlink')) for tag in tags):
+                        raise ExchangeError('personal_task_required')
             return {'selectedId':selected, 'profile':candidate['profile'], 'sourceNamespace':identity['sourceNamespace']}
 
     @staticmethod

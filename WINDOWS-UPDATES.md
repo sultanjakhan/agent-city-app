@@ -59,3 +59,26 @@ The updater authenticates releases independently of Windows Authenticode.
 The current executable has not been signed with a Windows publisher certificate.
 This implementation covers Windows; macOS installation/update acceptance is
 separate. Application source is MIT licensed; dependency notices remain applicable.
+
+
+## Data folder and local CLI
+
+Settings → Data shows the actual storage directories. Choose an empty absolute
+local folder, then prepare the move. The host applies it after the normal close
+has stopped its own backend. The pointer remains at its stable location; copied
+files are hash-verified and the original folders remain available for recovery.
+Repositories and agent installations outside the data folders stay references.
+Symlinks, junctions, overlapping folders and concurrent writes are refused.
+
+`AgentCityBackend.exe --internal-script city.py context --cwd <directory>` and
+`skill-inventory` use the installed current-account native pipe. `report-use`
+reports a real enumerated skill use with a retry-safe event ID. These commands
+never launch or focus a window. Bound task execution reports use the Agent City
+MCP. An explicit `--port` remains available for a separately authorised legacy
+HTTP server.
+
+Cicada and Agent City exchange exact task IDs through the configured local
+connection. This is separate from PC/Mac sync: the Agent City Cloudflare relay
+transmits encrypted agent reports only, while Cicada owns task content. Each
+computer needs its own device token and the shared workspace encryption key.
+Installing one application does not automatically pair another computer.

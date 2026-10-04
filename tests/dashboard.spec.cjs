@@ -1,5 +1,11 @@
 const { test, expect } = require('./owner-fixture.cjs');
 
+test('live unbound reports remain accessible in history without a dashboard disclosure',async({page})=>{
+ await page.route('**/api/dashboard',async route=>{const body=await(await route.fetch()).json();body.cicada.tasks=[];body.cicada.historyTasks=[];body.runs=[{runId:'synthetic-unbound-live',taskKey:null,agent:'codex',model:null,status:'running',sequence:1,updatedAt:new Date().toISOString(),mcpCalls:null,skills:[],history:[]}];await route.fulfill({json:body});});
+ await page.goto('/#dashboard');await expect(page.locator('#dashboard-view details,#dashboard-view summary')).toHaveCount(0);await expect(page.locator('#work-registry')).toBeHidden();
+ await page.locator('#dashboard-history-tab').click();const row=page.locator('.task-widget-row').filter({hasText:'synthetic-unbound-live'});await expect(row).toContainText('Работает');await row.locator('.task-widget-open').click();await expect(page.locator('#dashboard-task-dialog')).toContainText('Не привязан к задаче Cicada.');await expect(page.locator('#dashboard-task-dialog details,#dashboard-task-dialog summary')).toHaveCount(0);
+});
+
 test('compact report keeps totals, six stages and fixed actions usable in both languages',async({page},testInfo)=>{
  const key='cicada-0123456789abcdef-compact';let revision=0;
  await page.route('**/api/dashboard',async route=>{
@@ -12,14 +18,14 @@ test('compact report keeps totals, six stages and fixed actions usable in both l
  const dialog=page.locator('#dashboard-task-dialog');await expect(dialog).toBeVisible();
  expect((await dialog.locator('.report-total-value').first().innerText()).replace(/\D/g,'')).toBe('1921');
  await expect(dialog.locator('.report-total-value').last()).toHaveText('14 мин');
- await expect(dialog.locator('.report-measurements')).not.toHaveAttribute('open','');
- const stageBoxes=await dialog.locator('.stage-report > summary').evaluateAll(nodes=>nodes.map(n=>({height:n.getBoundingClientRect().height,bottom:n.getBoundingClientRect().bottom})));
- expect(stageBoxes).toHaveLength(6);expect(Math.max(...stageBoxes.map(r=>r.height))).toBeLessThan(82);expect(stageBoxes[5].bottom).toBeLessThan(800);
+ await expect(dialog.locator('details,summary')).toHaveCount(0);
+ const stageBoxes=await dialog.locator('.stage-report-heading').evaluateAll(nodes=>nodes.map(n=>({height:n.getBoundingClientRect().height,bottom:n.getBoundingClientRect().bottom})));
+ expect(stageBoxes).toHaveLength(6);expect(Math.max(...stageBoxes.map(r=>r.height))).toBeLessThan(82);await dialog.locator('.stage-report').last().scrollIntoViewIfNeeded();
  await page.screenshot({path:testInfo.outputPath('compact-report-ru.png')});
- const review=dialog.locator('.stage-report').filter({hasText:'5. Проверка результата'});await review.locator(':scope > summary').click();await review.locator(':scope > summary').focus();
+ const review=dialog.locator('.stage-report').filter({hasText:'5. Проверка результата'});await page.locator('#copy-task-report').focus();
  revision++;await page.evaluate(()=>loadDashboard(true));
- await expect(review).toHaveAttribute('open','');await expect(review.locator(':scope > summary')).toBeFocused();
- await expect(dialog.locator('.stage-report').filter({hasText:'Новый этап'})).not.toHaveAttribute('open','');
+ await expect(review.locator('.run-metrics')).toHaveCount(1);await expect(page.locator('#copy-task-report')).toBeFocused();
+ await expect(dialog.locator('.stage-report').filter({hasText:'Новый этап'})).toHaveCount(1);
  await page.locator('#close-dashboard-task').click();await page.locator('#language').selectOption('en');
  await page.getByRole('button',{name:'Проверка отчёта задачи',exact:true}).click();
  await expect(dialog.locator('.report-totals')).toContainText('Reported tokens');await expect(dialog.locator('.report-totals')).toContainText('14 min');
@@ -51,16 +57,16 @@ test('task report shows exact stage totals, failed attempts and exports the same
  await expect(body).not.toContainText('unknown usage');
  await expect(body.locator('.stage-report')).toHaveCount(2);
  const extract=body.locator('.stage-report').first();
- await expect(extract.locator(':scope > summary')).toContainText('40 ток.');
- await expect(extract.locator(':scope > summary')).toContainText('model-a, model-b');
- await expect(extract.locator(':scope > summary .stage-skills')).toHaveText('Навыки: extract-fields, skill-bbbbbbbbbbbbbbbbbbbbbbbb');
- await expect(extract.locator(':scope > summary .stage-mcp')).toHaveText('MCP: fetch × 2 · частично');
- await expect(extract.locator(':scope > summary')).not.toContainText('qa-check');
- await expect(extract.locator('details.run-row')).toHaveCount(2);
- const review=body.locator('.stage-report').last();await review.locator(':scope > summary').click();
- await expect(review.locator(':scope > summary .stage-skills')).toHaveText('Навыки: qa-check');
- await expect(review.locator(':scope > summary .stage-mcp')).toHaveText('MCP: 0');
- await expect(review.locator('details.run-row')).toHaveCount(0);
+ await expect(extract.locator(':scope > .stage-report-heading')).toContainText('40 ток.');
+ await expect(extract.locator(':scope > .stage-report-heading')).toContainText('model-a, model-b');
+ await expect(extract.locator(':scope > .stage-report-heading .stage-skills')).toHaveText('Навыки: extract-fields, skill-bbbbbbbbbbbbbbbbbbbbbbbb');
+ await expect(extract.locator(':scope > .stage-report-heading .stage-mcp')).toHaveText('MCP: fetch × 2 · частично');
+ await expect(extract.locator(':scope > .stage-report-heading')).not.toContainText('qa-check');
+ await expect(extract.locator('article.run-row:not(.single-attempt)')).toHaveCount(2);
+ const review=body.locator('.stage-report').last();
+ await expect(review.locator(':scope > .stage-report-heading .stage-skills')).toHaveText('Навыки: qa-check');
+ await expect(review.locator(':scope > .stage-report-heading .stage-mcp')).toHaveText('MCP: 0');
+ await expect(review.locator('article.run-row:not(.single-attempt)')).toHaveCount(0);
  await expect(review.locator('.single-attempt .run-metrics')).toBeVisible();
  await expect(review).toContainText('Ошибка исполнителя. Причина не сообщена');
  await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.testReport=text;}}}));
@@ -73,7 +79,7 @@ test('task report shows exact stage totals, failed attempts and exports the same
  await page.locator('#copy-task-id').focus();
  await page.evaluate(()=>renderDashboardTask());
  await expect(page.locator('#copy-task-id')).toBeFocused();
- await expect(review).toHaveAttribute('open','');
+ await expect(body.locator('details,summary')).toHaveCount(0);
  await body.evaluate(el=>{el.scrollTop=el.scrollHeight;});
  for(const id of ['close-dashboard-task','copy-task-report']){const box=await page.locator('#'+id).boundingBox();expect(box.y).toBeGreaterThanOrEqual(0);expect(box.y+box.height).toBeLessThanOrEqual(844);}
  await page.locator('#close-dashboard-task').click();
@@ -90,7 +96,7 @@ test('old cumulative snapshots have overall usage and no invented stage splits',
  await page.goto('/?task='+key+'&history=1#dashboard');
  const body=page.locator('#dashboard-task-body');await expect(body.locator('.report-measurements .run-metrics')).toContainText('Вход: 265 · Выход: 1368');
  await expect(body.locator('.stage-report:not(.unallocated-runs)')).toHaveCount(0);
- await expect(body.locator('.unallocated-runs > summary')).toHaveText('Ещё отчёты без этапов: 1');
+ await expect(body.locator('.unallocated-runs > h3')).toHaveText('Ещё отчёты без этапов: 1');
  await expect(body.locator('.report-total-value').last()).toHaveText('—');
 });
 
@@ -175,8 +181,8 @@ test('dashboard automatically refreshes task stages and renders reported MCP cou
   });
   await selectSource(page,'production');await page.goto('/');
   await expect(page.locator('.task-stage')).toContainText('Initial actual stage');
-  await expect(page.locator('#dashboard-runs')).toContainText('docs / search × 3');
   await expect(page.locator('.task-stage')).toContainText('New actual stage',{timeout:8000});
+  await page.locator('#dashboard-history-tab').click();await page.locator('.task-widget-row').filter({hasText:'actual-run-01'}).locator('.task-widget-open').click();await expect(page.locator('#dashboard-task-body')).toContainText('docs / search × 3');
 });
 
 async function selectSource(page, sourceId) {
@@ -191,10 +197,10 @@ async function selectSource(page, sourceId) {
 
 test('dashboard uses the synthetic Cicada source and exposes the current version', async ({ page }) => {
   const health = await page.request.get('/api/health');
-  expect((await health.json()).version).toBe('0.5.19');
+  expect((await health.json()).version).toBe(require('../package.json').version);
   await selectSource(page, 'production');
   await page.goto('/');
-  await expect(page.locator('#app-version')).toHaveText('v0.5.19');
+  await expect(page.locator('#app-version')).toHaveText('v'+require('../package.json').version);
   await expect(page.locator('#dashboard-view')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Production task title', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Production task title', exact: true }).click();

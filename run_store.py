@@ -129,6 +129,8 @@ class RunStore:
                 raise RunConflict('a newer report already exists')
             if any(row[key] != old[key] for key in ('agent', 'taskKey', 'model', 'provider')):
                 raise RunError('a different task or executor needs a new run ID')
+            if old['status'] in {'done', 'error', 'cancelled'} and row['status'] != old['status']:
+                raise RunError('a terminal attempt needs a new run ID')
             for key in ('inputTokens', 'outputTokens'):
                 if old[key] is not None and (row[key] is None or row[key] < old[key]):
                     raise RunError('usage totals must not decrease')

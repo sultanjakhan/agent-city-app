@@ -29,6 +29,7 @@ APP_ID = "agent-city-panel"
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "vendor"))
 from storage_config import load_storage, prepare_skills, external_directory
+import storage_migration
 import model_workers as workers
 import access
 import panel_keys as credentials
@@ -53,6 +54,8 @@ from codex_controls import CodexControls, CodexControlsError, RevisionConflict a
 import sys
 from owner_session import OwnerSessions
 from run_store import PUBLIC_FIELDS, RunStore, RunError, RunConflict
+from task_sync import TaskSync
+from task_connection import TaskError
 from work_exchange import WorkExchange, ExchangeError, ExchangeConflict
 from cloud_sync import CloudSync, SyncError
 from cicada_connector import CicadaConnector, ConnectorError, ConnectorConflict
@@ -369,6 +372,8 @@ class Store:
         self.runs = RunStore(self.directory)
         self.cicada = CicadaConnector(self.directory, candidates=cicada_candidates if cicada_candidates is not None else [] if skills_root else storage.cicada_candidates)
         self.work_exchange = WorkExchange(self.directory, self.cicada, self.runs)
+        self.task_sync = TaskSync(self.directory)
+        self.task_sync.start()
         self.cloud = LocalOnlyCloud() if self.local_only else CloudSync(self.directory, self.cloud_reports)
         control_home = codex_home or (self.directory / 'test-codex-home' if skills_root else storage.codex_home)
         bridge = ('## Agent City\n\n'
@@ -503,7 +508,8 @@ class Store:
                           "clients": self.clients,
                           "settings": {"version": public_api.VERSION, "skillsRoot": str(self.skills.root),
                                        "libraryMode": "external", "localOnly": self.local_only,
-                                       "dataRoot": str(self.directory.resolve()), "registryUrl": catalog_directory.URL},
+                                       "dataRoot": str(self.directory.resolve()), "registryUrl": catalog_directory.URL,
+                                       "storage": storage_migration.status()},
                           "credentials": {p: None if self.local_only else access.key_available(p) if p in credentials.PROVIDERS else None for p in PROVIDERS},
                           "credentialInfo": {p: {"available": None, "source": "paused", "unverified": True, "canSave": False, "removable": False, "localOnly": True} if self.local_only else credentials.info(p) if p in credentials.PROVIDERS else {"available": None, "unverified": True, "canSave": False} for p in PROVIDERS},
                           "providerRegistry": self.providers.snapshot(),
@@ -818,6 +824,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, result)
             except (SourceError, OSError, ValueError):
                 return self.respond(400, {'error': 'Не удалось прочитать локальную конфигурацию источников.'})
+        if path == '/api/task-sync':
+            try:return self.respond(200,self.server.store.task_sync.snapshot())
+            except (TaskError,OSError):return self.respond(409,{'error':'task_sync_unavailable'})
         if path == '/api/cloud':
             return self.respond(200, self.server.store.cloud.status())
         if path in {'/api/dashboard', '/api/v1/dashboard', '/api/connectors'}:
@@ -927,6 +936,8 @@ class Handler(BaseHTTPRequestHandler):
                  "/work-registry.js": ("work-registry.js", "text/javascript; charset=utf-8"),
                  "/pipeline.css": ("pipeline.css", "text/css; charset=utf-8"),
                  "/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
+                 "/shared-tasks.js": ("shared-tasks.js", "text/javascript; charset=utf-8"),
+                 "/shared-tasks.css": ("shared-tasks.css", "text/css; charset=utf-8"),
                  "/data-sources.js": ("data-sources.js", "text/javascript; charset=utf-8"),
                  "/owner-session.js": ("owner-session.js", "text/javascript; charset=utf-8"),
                  "/appearance.js": ("appearance.js", "text/javascript; charset=utf-8"),
@@ -1062,17 +1073,43 @@ class Handler(BaseHTTPRequestHandler):
                     if path.endswith('/remove'):
                         store.last_attempt.pop(ident, None)
                 return self.respond(200, store.snapshot())
+            if path in {'/api/storage/prepare','/api/storage/cancel'}:
+                if not self.csrf_authorized():
+                    return self.respond(403, {'error': 'Обнови окно приложения перед сохранением.'})
+                try:
+                    if path.endswith('/prepare') and set(payload)=={'destination','revision'}:
+                        result=storage_migration.prepare(payload['destination'],payload['revision'])
+                    elif path.endswith('/cancel') and set(payload)=={'revision'}:
+                        result=storage_migration.cancel(payload['revision'])
+                    else:raise storage_migration.MigrationError('Неверные поля запроса переноса.')
+                    return self.respond(200,result)
+                except storage_migration.MigrationError as error:
+                    return self.respond(409,{'error':str(error)})
             if path in {'/api/cloud/profile','/api/cloud/sync'}:
                 if not self.csrf_authorized():
                     return self.respond(403, {'error': 'Обнови окно приложения перед сохранением.'})
                 if path.endswith('/profile'): self.server.store.cloud.configure(payload)
                 threading.Thread(target=self.server.store.cloud.sync, daemon=True).start()
                 return self.respond(200, self.server.store.cloud.status())
-            if path in {'/api/connectors/cicada', '/api/runs/report'}:
+            if path.startswith('/api/task-sync/'):
+                if not self.csrf_authorized():return self.respond(403,{'error':'task_scope_denied'})
+                sync=self.server.store.task_sync
+                try:
+                    if path=='/api/task-sync/configure' and set(payload)=={'config','revision'}:result=sync.configure(payload['config'],payload['revision'])
+                    elif path=='/api/task-sync/exchange' and payload=={}:result=sync.exchange()
+                    elif path=='/api/task-sync/queue' and set(payload)=={'version','operationId','command','arguments'} and payload['version']==1:result=sync.enqueue(payload['operationId'],payload['command'],payload['arguments'])
+                    elif path=='/api/task-sync/resolve' and set(payload)=={'operationId','revision'}:result=sync.resolve(payload['operationId'],payload['revision'])
+                    else:raise TaskError('invalid_task_sync_request')
+                    return self.respond(200,result)
+                except TaskError as error:return self.respond(error.status,{'isError':True,'code':error.code,'current':error.current,'error':error.code})
+            if path in {'/api/connectors/cicada', '/api/runs/report', '/api/agent/report'}:
                 if not self.csrf_authorized():
                     return self.respond(403, {'error': 'Обнови окно приложения перед сохранением.'})
                 if path.endswith('/cicada'):
                     return self.respond(200, self.server.store.cicada.select(payload.get('sourceId'), payload.get('revision')))
+                if path == '/api/agent/report':
+                    from agent_reporting import report
+                    return self.respond(200, report(self.server.store, payload))
                 known_skills = {s['id'] for s in self.server.store.inventory.list()}
                 ids = payload.get('skillIds', [])
                 if not isinstance(ids, list) or any(not isinstance(ident, str) or ident not in known_skills for ident in ids):
@@ -1190,6 +1227,8 @@ def main():
     parser.add_argument("--local-only", action="store_true", help="disable cloud, credential observation/mutations and provider requests")
     parser.add_argument("--owner-control-stdin",action="store_true",help="private inherited owner control channel")
     args = parser.parse_args()
+    from storage_lock import StorageLock
+    writer_lock = StorageLock(args.data_dir)
     store = Store(args.data_dir, local_only=args.local_only)
     bootstrap = os.environ.pop("AGENT_CITY_OWNER_BOOTSTRAP", None)
     server = Server(("127.0.0.1", args.port), store, bootstrap=bootstrap, owner_host=os.environ.pop("AGENT_CITY_OWNER_HOST", None), exclusive=args.owner_control_stdin)
@@ -1206,6 +1245,7 @@ def main():
         pass
     finally:
         server.server_close()
+        writer_lock.__exit__()
 
 
 if __name__ == "__main__":

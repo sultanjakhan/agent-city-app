@@ -1,5 +1,5 @@
 """Versioned read contract for repositories; no credentials, CSRF or reply bodies."""
-VERSION = '0.5.23'
+VERSION = '0.5.24'
 
 
 def reporting():

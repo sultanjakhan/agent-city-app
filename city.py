@@ -3,12 +3,43 @@ import argparse
 import json
 import re
 import sys
+import os
+import subprocess
 from pathlib import Path
 from urllib.error import URLError, HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, build_opener, ProxyHandler
 from provider_catalogs import _NoRedirect
 from codex_usage import UsageError, usage_for_turn, enrich_report
+
+
+def native_request(path, body=None):
+    """Use the installed current-account pipe; never start/focus an application."""
+    if os.name != 'nt':
+        return None
+    pointer = Path(os.environ.get('AGENT_CITY_CONFIG') or
+                   Path(os.environ['LOCALAPPDATA']) / 'Agent City/connection.json')
+    if not pointer.is_file():
+        return None
+    host = (Path(sys.executable).parent.parent / 'AgentCity.exe' if getattr(sys, 'frozen', False)
+            else Path(os.environ['LOCALAPPDATA']) / 'Programs/Agent City/AgentCity.exe')
+    for item in (pointer, *pointer.parents, host, *host.parents):
+        if item.exists() and (item.is_symlink() or getattr(item.lstat(), 'st_file_attributes', 0) & 0x400):
+            raise ValueError('redirected native authority')
+    if not host.is_file():
+        raise OSError('native host unavailable')
+    frame = json.dumps({'method': 'GET' if body is None else 'POST', 'path': path, 'body': body},
+                       ensure_ascii=False, allow_nan=False).encode() + b'\n'
+    if len(frame) >= 16000:
+        raise ValueError('native request too large')
+    result = subprocess.run([str(host), '--agent-request-stdin', str(pointer)], input=frame,
+                            capture_output=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
+    if len(result.stdout) > 1024 * 1024:
+        raise ValueError('native reply too large')
+    reply = json.loads(result.stdout)
+    if result.returncode or not reply.get('ok'):
+        raise OSError('native authority rejected request')
+    return reply['result']
 
 
 def delegated_stdin():
@@ -26,7 +57,10 @@ def delegated_stdin():
         with build_opener(ProxyHandler({}),_NoRedirect()).open(request,timeout=10) as response:raw=response.read(8*1024*1024+1)
         if len(raw)>8*1024*1024:raise ValueError()
         payload=json.loads(raw)
-        print(json.dumps(payload,ensure_ascii=False,allow_nan=False))
+        # The inherited-pipe protocol is UTF-8, regardless of the Windows
+        # console code page of a newly launched (including frozen) CLI child.
+        sys.stdout.buffer.write(json.dumps(payload,ensure_ascii=False,allow_nan=False).encode('utf-8')+b'\n')
+        sys.stdout.buffer.flush()
         return 0
     except (ValueError,TypeError,KeyError,OSError,URLError):
         print('Owner-delegated CLI request rejected; no grant details are logged.',file=sys.stderr)
@@ -38,7 +72,7 @@ def main():
         return delegated_stdin()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('resource', choices=['manifest', 'models', 'providers', 'skills', 'skill-inventory', 'projects', 'extensions', 'repositories', 'rules', 'context', 'report-use', 'directory', 'dashboard', 'report-run', 'codex-usage'])
-    parser.add_argument('--port', type=int, default=47831)
+    parser.add_argument('--port', type=int, help='explicit legacy HTTP server; otherwise use the installed native pipe')
     parser.add_argument('--slug', help='read one skill, with the skills resource')
     parser.add_argument('--id', help='read an enumerated skill from skill-inventory')
     parser.add_argument('--cwd', help='working directory for repository context')
@@ -60,6 +94,8 @@ def main():
         if args.resource == 'codex-usage':
             print(json.dumps(usage, indent=2))
             return
+    explicit_port = args.port is not None
+    args.port = args.port if explicit_port else 47831
     if not 1 <= args.port <= 65535:
         parser.error('invalid local port')
     url = f'http://127.0.0.1:{args.port}/api/v1/{args.resource}'
@@ -81,6 +117,21 @@ def main():
         parser.error('report-use requires --id and --event-id')
     if args.resource == 'report-run' and not args.file:
         parser.error('report-run requires --file')
+    if not explicit_port:
+        try:
+            if args.resource == 'report-run':
+                parser.exit(1, 'Use the Agent City MCP for reports bound to an exact Cicada task.\n')
+            path = url.split('/api/', 1)[1]
+            body = None
+            if args.resource == 'report-use':
+                path = 'skill-activity'
+                body = {'id': args.id, 'kind': 'use', 'agent': args.agent, 'eventId': args.event_id}
+            payload = native_request('/api/' + path, body)
+            if payload is not None:
+                print(json.dumps(payload, ensure_ascii=False, indent=2))
+                return 0
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            parser.exit(1, 'Installed Agent City is unavailable or denied the native request. No window was opened.\n')
     try:
         opener = build_opener(ProxyHandler({}), _NoRedirect())
         req = Request(url)

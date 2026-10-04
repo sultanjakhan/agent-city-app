@@ -75,9 +75,9 @@ internal static class InstancePolicy
 {
     public static string FocusName(string scope, string configScope, bool localOnly) =>
         "Local\\AgentCityDesktopFocus-" + scope + "-" + configScope + "-" + (localOnly ? "local" : "normal");
-    public static bool Signal(string scope, string configScope, bool localOnly)
+    public static bool Signal(string scope, string configScope, bool localOnly, bool activate = true)
     {
-        try { using var signal = EventWaitHandle.OpenExisting(FocusName(scope, configScope, localOnly)); return signal.Set(); }
+        try { using var signal = EventWaitHandle.OpenExisting(FocusName(scope, configScope, localOnly)); return !activate || signal.Set(); }
         catch (WaitHandleCannotBeOpenedException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
     }

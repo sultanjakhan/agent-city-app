@@ -2,6 +2,13 @@
 // Trusted interface messages only. Provider/model identifiers and replies stay verbatim.
 const I18n=(()=>{
  const en={
+  'Результат {version}':'Result {version}',
+  'Принято':'Accepted',
+  'Запрошена доработка':'Changes requested',
+  'Передано на проверку':'Awaiting review',
+  'Исполнитель подтвердил доработку':'Rework acknowledged',
+  'Запрос на доработку':'Rework request',
+  'Найти задачу в снимках':'Find a task in snapshots',
   "\u0422\u0435\u043c\u0430":"Theme",
   "\u0422\u0435\u043c\u0430 \u0438\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430":"Interface theme",
   "\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u0430\u044f":"System",

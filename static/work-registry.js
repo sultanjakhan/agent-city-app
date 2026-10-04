@@ -10,12 +10,11 @@ function registryControls(){
  $('work-registry-file').disabled=workRegistryBusy;
 }
 async function registryRefresh(){workRegistryState=await request('/api/work-exchange');drawWorkRegistry();}
-async function renderWorkRegistry(){try{await registryRefresh();}catch{registryMessage("Registry unavailable; no import applied.");}}
+async function renderWorkRegistry(){try{if(!dashboardData)await loadDashboard();await registryRefresh();}catch{registryMessage("Registry unavailable; no import applied.");}}
 function updateWorkRegistrySnapshot(snapshot){if(snapshot){workRegistryState=snapshot;drawWorkRegistry();}}
 function registryFreshness(snapshot,task){const now=Date.now(),published=Date.parse(snapshot.publishedAt),updated=Date.parse(task.lastUpdated);if(!Number.isFinite(published)||!Number.isFinite(updated)||published>now||updated>now)return 'unknown';return now-updated>snapshot.staleAfterSeconds*1000?'stale':'fresh';}
 function drawWorkRegistry(){
- const open=new Set([...$('work-registry-tasks').querySelectorAll('details[open]')].map(node=>node.dataset.registryDetailKey));
- const query=$('dashboard-search').value.trim().toLowerCase();
+ const query=$('work-registry-search').value.trim().toLowerCase();
  const root=$('work-registry-tasks');root.replaceChildren();
  for(const entry of Object.values(workRegistryState?.publishers||{})){
   const snapshot=entry.snapshot, section=registryNode('section');section.className='registry-publisher';
@@ -27,7 +26,7 @@ function drawWorkRegistry(){
    const stack=(children.get('')||[]).map(task=>({task,depth:0})).reverse();
    while(stack.length){
     const {task,depth}=stack.pop(), card=registryNode('article');card.className='dashboard-task registry-task';card.dataset.registryTaskId=task.id;card.style.marginLeft=Math.min(depth,5)*12+'px';
-    const detail=registryNode('details'), summary=registryNode('summary',task.title);detail.dataset.registryDetailKey=WorkRegistryKey(snapshot,task);detail.open=open.has(detail.dataset.registryDetailKey);detail.append(summary);
+    const detail=registryNode('section');detail.append(registryNode('h4',task.title));
     detail.append(registryNode('p',t('{status} · {freshness} · {relationship} · confirmed {updated}',{status:registryEnum(task.status),freshness:registryEnum(registryFreshness(snapshot,task)),relationship:registryEnum(task.relationship),updated:task.lastUpdated})));
     detail.append(registryNode('p',t('Source: {reference}',{reference:task.provenance.reference})));
     for(const key of ['operation','waitingFor','result'])if(task[key]!==null)detail.append(registryNode('p',`${t(key)}: ${task[key]}`));
@@ -66,7 +65,6 @@ $('work-registry-apply').addEventListener('click',async()=>{
  finally{workRegistryBusy=false;registryControls();}
 });
 
-function WorkRegistryKey(snapshot,task){return snapshot.source.publisherId+':'+snapshot.source.sourceNamespace+':'+task.id;}
-$('dashboard-search').addEventListener('input',()=>{if(workRegistryState)drawWorkRegistry();});
+$('work-registry-search').addEventListener('input',()=>{if(workRegistryState)drawWorkRegistry();});
 
 document.addEventListener('agentcity-language-change',()=>{if(workRegistryState)drawWorkRegistry();if(workRegistryMessage)registryMessage(workRegistryMessage.key,workRegistryMessage.values);});

@@ -8,6 +8,7 @@ import time
 from owner_broker import OwnerBroker
 
 MAX_MESSAGE = 16384
+MAX_REPLY = 1024 * 1024
 
 
 def pairs(items):
@@ -23,11 +24,14 @@ def request(raw, expected):
     if len(raw) > MAX_MESSAGE or not raw.endswith(b"\n"):
         raise ValueError("frame")
     value = json.loads(raw, object_pairs_hook=pairs)
-    if type(value) is not dict or set(value) != {"version", "id", "action", "draftsClosed"}:
+    fields = {"version", "id", "action", "draftsClosed"}
+    if type(value) is dict and value.get("action") == "agent-request":
+        fields.add("request")
+    if type(value) is not dict or set(value) != fields:
         raise ValueError("fields")
     if type(value["version"]) is not int or value["version"] != 1 or type(value["id"]) is not int or value["id"] != expected:
         raise ValueError("sequence")
-    if type(value["draftsClosed"]) is not bool or value["action"] not in ("bootstrap", "revoke", "stop", "restart", "status"):
+    if type(value["draftsClosed"]) is not bool or value["action"] not in ("bootstrap", "revoke", "stop", "restart", "status", "agent-request"):
         raise ValueError("action")
     if value["action"] in ("stop", "restart") and value["draftsClosed"] is not True:
         raise ValueError("explicit draft closure required")
@@ -36,7 +40,7 @@ def request(raw, expected):
 
 def send(value):
     raw = json.dumps(value, separators=(",", ":"), allow_nan=False).encode() + b"\n"
-    if len(raw) > MAX_MESSAGE:
+    if len(raw) > MAX_REPLY:
         raise ValueError("response limit")
     sys.stdout.buffer.write(raw)
     sys.stdout.buffer.flush()
@@ -74,7 +78,17 @@ def main(argv=None):
                 sequence += 1
                 deadline = time.monotonic() + 30
                 action = message["action"]
-                if action == "status":
+                if action == "agent-request":
+                    # This is the surviving trusted controller's own CLI child.
+                    # The broker's exact grant allowlist remains authoritative.
+                    try:
+                        incoming = message["request"]
+                        if type(incoming) is not dict or set(incoming) != {"method", "path", "body"}:
+                            raise ValueError("unsupported request")
+                        result = broker.run_cli(incoming["method"], incoming["path"], incoming["body"], deadline=deadline)
+                    except Exception:
+                        result = {"isError": True, "error": "agent_request_rejected_or_outcome_unknown"}
+                elif action == "status":
                     result = {"backendAlive":bool(broker.child and broker.child.poll() is None), "localOnly":local_only}
                 elif action == "bootstrap":
                     broker.recover_browser(deadline=deadline)

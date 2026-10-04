@@ -1,8 +1,55 @@
 # Task/run connection proposal
 
-Status: proposal for coordination before Cicada integration. No Cicada writes,
-ID migration, reporting protocol change or automatic task completion is included
-in the connection-status release.
+Status: the original exchange proposal below remains compatible. Local agent
+access now registers actual authorized personal work through the running Cicada
+authority. It does not automatically complete tasks or start human timers.
+
+## Local agent access
+
+`tools/agent_mcp.py` exposes independent stdio MCP servers for Cicada and Agent
+City. Launch with `--app cicada|agent-city --profile <configured profile path>
+--client <LocalPipeClient.exe>`. `--call <tool>` accepts one JSON argument object
+from stdin for administrative diagnostics. Paths are configured host input;
+tool arguments cannot select a database, execute commands or change profiles.
+
+Both endpoints use profile-bound Windows named pipes restricted to the current
+account. Other users and remote clients are excluded. This is a same-account
+trust boundary; it does not isolate a malicious process running as that account.
+Agent City forwards its small read/report allowlist through the existing private
+host broker and one-use grants. Bootstrap, state writes and lifecycle controls
+are excluded from agent requests.
+
+Cicada `begin_ai_work` commits task/binding/report/operation receipt together.
+An existing task requires its current native version; a new task is explicitly
+personal. Reuse operationId and the exact request after a timeout. Changing the
+payload under that ID fails. Reports use cumulative observed fields, monotonic
+sequences and immutable attempt identity. Restarting a terminal attempt requires
+a new run ID. Unknown model/provider/token usage stays null.
+
+Agent City accepts the exact native binding from the selected configured source,
+pairs only that explicitly reported personal task, and uses its existing RunStore.
+Merely reading a cloned source does not inherit a production pairing. Report
+delivery across applications is retriable, not one distributed transaction.
+
+`tools/agent_hooks.py` handles actual local client lifecycle callbacks. It stores
+only session/run IDs, native requests and receipts in a transport outbox. It
+does not read or store prompt/transcript/tool arguments. Personal directory roots
+are explicitly configured. One task represents a chat, with a separate run for
+each observed turn. Generic chat titles are deliberate; a caller can register a
+meaningful existing task with the MCP tool. Stop marks the AI turn ended, while
+native task completion remains separate. An unavailable application retains the
+pending item and never blocks AI work. Directory scoping is an opt-in preference,
+not a data-loss prevention boundary for another process under the same account.
+UserPromptSubmit reserves an attempt but does not mark it running. PreToolUse
+acknowledges actual agent-loop work. A text-only turn is recorded when Stop
+provides evidence it actually finished. An unacknowledged failed/cancelled
+request never becomes a running task.
+
+Local hooks require client support and trust. Cloud orchestration cannot use a
+PC-local pipe; it needs a separate authenticated remote adapter. No cloud
+service, publisher, public repository or paid inference is enabled here.
+Native exchange/receipt stores and the transport outbox are bounded at 500
+entries; capacity errors are explicit rather than silently discarding receipts.
 
 ## Existing compatible report contract
 

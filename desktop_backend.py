@@ -3,6 +3,12 @@ import sys
 
 
 def main():
+    if len(sys.argv)==3 and sys.argv[1]=='--apply-storage-migration':
+        import json
+        from storage_migration import apply_prepared
+        result=apply_prepared(sys.argv[2])
+        print(json.dumps(result))
+        return 0 if result['state'] in {'idle','complete'} else 3
     if sys.argv[1:] == ["--self-test"]:
         import json
         from pathlib import Path

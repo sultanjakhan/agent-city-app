@@ -39,3 +39,5 @@ playwright-report/
 # Isolated desktop host build intermediates
 desktop/bin/
 desktop/obj/
+tools/pipe-client/bin/
+tools/pipe-client/obj/

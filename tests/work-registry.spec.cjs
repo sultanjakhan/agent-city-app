@@ -9,11 +9,11 @@ function snapshot(title='Synthetic published task'){
 }
 async function api(page,route,body){const state=await(await page.request.get('/api/state')).json();const response=await page.request.post(route,{data:body,headers:{'X-Agent-City':'1','X-Agent-City-Token':state.csrfToken}});return {status:response.status(),body:await response.json()};}
 async function selectSource(page,id){const state=await(await page.request.get('/api/connectors')).json();const result=await api(page,'/api/connectors/cicada',{sourceId:id,revision:state.revision});expect(result.status).toBe(200);}
-async function openImport(page){await page.goto('/#dashboard');await page.locator('#work-registry > details > summary').click();}
+async function openImport(page){await page.goto('/#settings');await page.locator('#settings-tab-data').click();await page.locator('#language').selectOption('en');}
 async function preview(page,doc){await page.locator('#work-registry-file').setInputFiles({name:'synthetic-exchange.json',mimeType:'application/json',buffer:Buffer.from(typeof doc==='string'?doc:JSON.stringify(doc))});await page.locator('#work-registry-preview').click();await expect(page.locator('#work-registry-apply')).toBeEnabled();}
 async function apply(page,accept=true){page.once('dialog',dialog=>accept?dialog.accept():dialog.dismiss());await page.locator('#work-registry-apply').click();if(accept)await expect(page.locator('#work-registry-message')).toContainText('saved locally');}
 
-test('published hierarchy remains an observation, survives reload, keeps disclosures and responds to search',async({page})=>{
+test('published hierarchy remains an observation, survives reload, keeps visible details and responds to search',async({page})=>{
  const errors=[];page.on('pageerror',error=>errors.push(error.message));await openImport(page);
  const doc=snapshot('Synthetic <img src=x onerror=window.registryInjected=true>');
  doc.tasks.push({...doc.tasks[0],id:'child',title:'Synthetic child decision',parentTaskId:'root',relationship:'parallel',status:'decision-needed',localBinding:null});
@@ -21,11 +21,11 @@ test('published hierarchy remains an observation, survives reload, keeps disclos
  const before=await(await page.request.get('/api/work-exchange')).json();expect(before.publishers[doc.source.publisherId+':'+doc.source.sourceNamespace]).toBeUndefined();
  await apply(page,false);await expect(page.locator('#work-registry-apply')).toBeEnabled();await apply(page);
  const root=page.locator('[data-registry-task-id=root]').filter({hasText:doc.tasks[0].title});await expect(root).toContainText('checking · stale');
- await root.locator('summary').first().click();await expect(root.locator('details').first()).toHaveAttribute('open','');
- await page.evaluate(()=>loadDashboard(true));await expect(root.locator('details').first()).toHaveAttribute('open','');
+ await expect(root.locator('h4').first()).toBeVisible();await expect(root.locator('details,summary')).toHaveCount(0);
+ await page.evaluate(()=>loadDashboard(true));await expect(root.locator('h4').first()).toBeVisible();
  await expect(root).toContainText('Dispatch unavailable');expect(await page.evaluate(()=>window.registryInjected)).toBeUndefined();await expect(page.locator('#work-registry img')).toHaveCount(0);
- await page.locator('#dashboard-search').fill('Synthetic child decision');await expect(page.locator('[data-registry-task-id=child]').filter({hasText:'Synthetic child decision'})).toBeVisible();await expect(root).toHaveCount(0);
- await page.locator('#dashboard-search').fill('');await page.reload();await expect(root).toContainText('checking · stale');expect(errors).toEqual([]);
+ await page.locator('#work-registry-search').fill('Synthetic child decision');await expect(page.locator('[data-registry-task-id=child]').filter({hasText:'Synthetic child decision'})).toBeVisible();await expect(root).toHaveCount(0);
+ await page.locator('#work-registry-search').fill('');await page.reload();await expect(root).toContainText('checking · stale');expect(errors).toEqual([]);
 });
 
 test('explicit stable binding imports reports dynamically, exports strict envelope, and never invents usage or task completion',async({page})=>{
@@ -33,10 +33,10 @@ test('explicit stable binding imports reports dynamically, exports strict envelo
  const doc=snapshot('Synthetic paired registry');await preview(page,doc);await apply(page);
  const run={runId:'synthetic-'+randomUUID(),sequence:1,taskKey:binding().taskKey,agent:'codex',model:null,provider:null,stage:'synthetic-check',status:'waiting',skillIds:[],mcpCalls:null,inputTokens:null,outputTokens:null};
  await preview(page,{schemaVersion:1,kind:'cicada-run-report',binding:binding(),report:run});await apply(page);
- const card=page.locator('[data-registry-task-id=root]').filter({hasText:'Synthetic paired registry'});await card.locator('summary').first().click();await expect(card).toContainText('Imported executor reports: 1');await expect(card).toContainText('Cost unknown');
+ const card=page.locator('[data-registry-task-id=root]').filter({hasText:'Synthetic paired registry'});await expect(card).toContainText('Imported executor reports: 1');await expect(card).toContainText('Cost unknown');
  await expect(card.locator('.report-total-value').first()).toHaveText('—');
  const downloaded=page.waitForEvent('download');await card.getByRole('button',{name:'Export latest report'}).click();const download=await downloaded;const file=await download.path();const exported=JSON.parse(await fs.readFile(file,'utf8'));expect(exported.binding).toEqual(binding());expect(exported.report.runId).toBe(run.runId);expect(exported.report.inputTokens).toBeNull();expect(exported.report.updatedAt).toBeUndefined();
- const result=await api(page,'/api/runs/report',{...run,sequence:2,status:'done'});expect(result.status).toBe(200);await page.evaluate(()=>loadDashboard(true));await expect(card.locator('.stage-report')).toContainText('Завершено');
+ const result=await api(page,'/api/runs/report',{...run,sequence:2,status:'done'});expect(result.status).toBe(200);await page.evaluate(()=>loadDashboard(true));await expect(card.locator('.stage-report')).toContainText('Done');
  const dashboard=await(await page.request.get('/api/dashboard')).json();expect(dashboard.cicada.tasks.find(task=>task.sourceId==='shared-task').completed).toBe(false);expect(doc.tasks[0].status).toBe('checking');
  await selectSource(page,'dev');await page.evaluate(()=>loadDashboard(true));await expect(card).toContainText('not paired');await expect(card.getByRole('button',{name:'Export latest report'})).toHaveCount(0);await selectSource(page,'production');
 });
