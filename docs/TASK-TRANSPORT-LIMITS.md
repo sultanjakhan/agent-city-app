@@ -2,8 +2,10 @@
 
 The task result path accepts UTF-8 JSON frames up to 64 KiB at the HTTP queue,
 native agent pipe, MCP bridge, and task gateway boundaries. This limit covers
-the complete encoded frame, including JSON structure and the trailing newline;
-the task result itself remains bounded by the existing TaskSync validation.
+the complete encoded frame, including JSON structure and, for pipe/MCP frames,
+the trailing newline. HTTP counts its encoded body. Cicada still validates each
+result against its existing 8000-byte UTF-8 content limit; queueing a request in
+Agent City alone does not mean Cicada has accepted the result.
 
 The owner broker and delegated CLI use a 256 KiB trusted internal frame budget
 to leave room for envelope and JSON overhead. Ordinary owner control messages
