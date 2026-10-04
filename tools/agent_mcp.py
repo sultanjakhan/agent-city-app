@@ -18,7 +18,7 @@ class NativeTaskError(RuntimeError):
         self.value=value
         super().__init__(value.get('code',value.get('error','task_command_failed')))
 
-MAX_FRAME = 16000
+MAX_FRAME = 64 * 1024
 
 
 def unique(pairs):
@@ -75,7 +75,7 @@ class Bridge:
 
     def call(self, value):
         raw = json.dumps(value, ensure_ascii=False, allow_nan=False).encode() + b'\n'
-        if len(raw) >= MAX_FRAME: raise ValueError('request too large')
+        if len(raw) > MAX_FRAME: raise ValueError('request too large')
         flags = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
         response = subprocess.run([self.client, self.name], input=raw, capture_output=True, timeout=45, **flags)
         if len(response.stdout) > 1024 * 1024: raise ValueError('response too large')

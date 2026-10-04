@@ -29,6 +29,9 @@ class Gateway:
             config={**backend,**{k:copy.deepcopy(grant[k]) for k in ('scopes','taskIds','sourceNamespace')}}
             validate_config(config);self.grants.append((token,config))
         if not self.grants:raise ValueError('at least one scoped grant required')
+    def authorized(self, authorization):
+        token=authorization[7:] if isinstance(authorization,str) and authorization.startswith('Bearer ') else ''
+        return any(hmac.compare_digest(token,secret) for secret,_ in self.grants)
     def dispatch(self,authorization,request):
         token=authorization[7:] if isinstance(authorization,str) and authorization.startswith('Bearer ') else ''
         config=next((c for secret,c in self.grants if hmac.compare_digest(token,secret)),None)
@@ -54,8 +57,13 @@ def server_for(gateway,host='127.0.0.1',port=0):
             status=200
             try:
                 if self.path!='/commands' or self.headers.get('Content-Type')!='application/json':raise TaskError('invalid_api_route',404)
+                if not gateway.authorized(self.headers.get('Authorization')):
+                    self.close_connection=True
+                    raise TaskError('task_authentication_rejected',401)
                 count=int(self.headers.get('Content-Length','0'))
-                if not 0<count<16000:raise TaskError('api_frame_limit',413)
+                if not 0<count<=64*1024:
+                    self.close_connection=True
+                    raise TaskError('api_frame_limit',413)
                 value=gateway.dispatch(self.headers.get('Authorization'),strict(self.rfile.read(count)))
             except TaskError as e:status=e.status;value={'isError':True,'status':status,'code':e.code,'current':e.current}
             except Exception:status=503;value={'isError':True,'status':503,'code':'application_unavailable_or_outcome_unknown'}

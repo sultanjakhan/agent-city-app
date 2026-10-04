@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Text;
 
-const int InputLimit = 16000, OutputLimit = 1024 * 1024;
+const int InputLimit = 64 * 1024, OutputLimit = 1024 * 1024;
 async Task<byte[]> Read(Stream stream, int limit, CancellationToken ct)
 {
     using var data = new MemoryStream();var one = new byte[1];

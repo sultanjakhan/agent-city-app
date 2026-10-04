@@ -778,9 +778,11 @@ class Handler(BaseHTTPRequestHandler):
         host = self.headers.get("Host")
         origin = self.headers.get("Origin")
         if host not in hosts or (origin is not None and origin != f"http://{host}"):
+            self.close_connection = True
             self.respond(403, {"error": "Доступ разрешён только из локального приложения."})
             return False
         if write and self.headers.get("X-Agent-City") != "1":
+            self.close_connection = True
             self.respond(403, {"error": "Неверный запрос приложения."})
             return False
         path = urlsplit(self.path).path
@@ -790,6 +792,7 @@ class Handler(BaseHTTPRequestHandler):
             if host==owner_host and self.server.owner_sessions.grant_authorized(grant,self.command,self.path,consume=self.command=='GET'):
                 self.owner_delegation_pending=self.command!='GET';self.owner_delegation_consumed=self.command=='GET'
             else:
+                self.close_connection = True
                 self.respond(401,{'error':'owner_session_required'});return False
         return True
 
@@ -987,8 +990,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             path = urlsplit(self.path).path
-            limit = 2 * 1024 * 1024 if path.startswith(('/api/skills/', '/api/projects/', '/api/extensions/', '/api/rules/', '/api/data-sources/', '/api/pipelines/', '/api/work-exchange/')) else 4096
+            limit = 2 * 1024 * 1024 if path.startswith(('/api/skills/', '/api/projects/', '/api/extensions/', '/api/rules/', '/api/data-sources/', '/api/pipelines/', '/api/work-exchange/')) else (64 * 1024 if path == '/api/task-sync/queue' else 4096)
             if length < 1 or length > limit:
+                self.close_connection = True
                 return self.respond(413, {"error": "Неверный размер запроса."})
             self.connection.settimeout(5)
             payload = json.loads(self.rfile.read(length))

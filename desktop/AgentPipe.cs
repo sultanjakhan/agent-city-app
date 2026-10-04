@@ -9,7 +9,7 @@ namespace AgentCityDesktop;
 // Local, current OS account authority. No browser grants or credentials leave the host.
 internal sealed class AgentPipe : IDisposable
 {
-    private const int RequestLimit = 16000, ReplyLimit = 1024 * 1024;
+    private const int RequestLimit = 64 * 1024, ReplyLimit = 1024 * 1024;
     private readonly string name;
     private readonly Func<JsonElement, Task<JsonElement>> dispatch;
     private readonly CancellationTokenSource stop = new();
@@ -125,10 +125,17 @@ internal sealed class AgentPipe : IDisposable
         server.Start();
         var valid = Utf8.GetBytes("{\"method\":\"GET\",\"path\":\"/api/v1/context?cwd=synthetic\",\"body\":null}");
         using var accepted = JsonDocument.Parse(await Call(name, valid));
+        var longBody = JsonSerializer.SerializeToUtf8Bytes(new { method = "POST", path = "/api/task-sync/queue", body = new { version = 1, operationId = "pipe-long-001", command = "submit_result", arguments = new { content = new string('Ж', 4000) } } });
+        if (longBody.Length <= 16000 || longBody.Length > RequestLimit) throw new InvalidDataException("Self-test valid frame size");
+        using var longAccepted = JsonDocument.Parse(await Call(name, longBody));
         using var rejected = JsonDocument.Parse(await Call(name, Utf8.GetBytes("{\"method\":\"GET\",\"path\":\"/api/state\",\"body\":null}")));
         using var duplicate = JsonDocument.Parse(await Call(name, Utf8.GetBytes("{\"method\":\"GET\",\"method\":\"POST\",\"path\":\"/api/state\",\"body\":null}")));
-        var passed = accepted.RootElement.GetProperty("ok").GetBoolean() && !rejected.RootElement.GetProperty("ok").GetBoolean() &&
-            !duplicate.RootElement.GetProperty("ok").GetBoolean() && count == 1;
+        bool oversizeRejected;
+        try { var oversized = JsonSerializer.SerializeToUtf8Bytes(new { method = "POST", path = "/api/task-sync/queue", body = new { version = 1, operationId = "pipe-over-001", command = "submit_result", arguments = new { content = new string('Ж', 20000) } } }); await Call(name, oversized); oversizeRejected = false; }
+        catch (InvalidDataException) { oversizeRejected = true; }
+        var passed = accepted.RootElement.GetProperty("ok").GetBoolean() && longAccepted.RootElement.GetProperty("ok").GetBoolean() &&
+            !rejected.RootElement.GetProperty("ok").GetBoolean() && !duplicate.RootElement.GetProperty("ok").GetBoolean() &&
+            oversizeRejected && count == 2;
         await Write(Console.OpenStandardOutput(), JsonSerializer.SerializeToUtf8Bytes(new { agentPipeSelfTest = passed, currentUserOnly = true, appStarted = false }), CancellationToken.None);
         return passed ? 0 : 2;
     }

@@ -97,7 +97,7 @@ internal sealed class PrivateBridge
             var frame = agentRequest is null
                 ? JsonSerializer.Serialize(new { version = 1, id, action, draftsClosed })
                 : JsonSerializer.Serialize(new { version = 1, id, action, draftsClosed, request = agentRequest });
-            if (Encoding.UTF8.GetByteCount(frame) >= 16384) throw new InvalidDataException("Private frame limit");
+            if (Encoding.UTF8.GetByteCount(frame) > (action == "agent-request" ? 256 * 1024 : 16384)) throw new InvalidDataException("Private frame limit");
             await process!.StandardInput.WriteLineAsync(frame.AsMemory(), timeout.Token);
             await process.StandardInput.FlushAsync(timeout.Token);
             var reply = await ReadFrame(process.StandardOutput, timeout.Token, action == "agent-request" ? 1024 * 1024 : 16384);
