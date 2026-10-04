@@ -1,0 +1,7 @@
+{
+  "name": "agent-city-cloud-sync",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node --test worker.test.mjs", "check": "wrangler deploy --dry-run", "deploy": "wrangler deploy"},
+  "devDependencies": {"miniflare": "5.20260903.0-alpha", "wrangler": "4.129.0"}
+}

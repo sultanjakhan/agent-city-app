@@ -33,6 +33,11 @@ remain untouched; enabling those integrations later is a separate choice.
 
 ## Separate private storage
 
+The existing encrypted activity relay is included in [sync-relay](sync-relay/README.md).
+It uses Cloudflare SQLite Durable Objects compatible with Workers Free and keeps
+Agent City independent of Cicada's data and keys. This currently covers activity
+reports, not a complete settings/skills synchronization system.
+
 Application source and synthetic demonstrations live in this repository. Mutable
 projects, skills, rules, settings and activity live outside it. A new installation
 defaults to the adjacent `../agent-city-data/` directory. On first use it receives

@@ -34,6 +34,7 @@ test-results/
 playwright-report/
 .playwright-mcp/
 .venv/
+.wrangler/
 
 # Isolated desktop host build intermediates
 desktop/bin/

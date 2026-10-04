@@ -11,6 +11,7 @@ class DesktopPackagingTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.base=Path(self.temp.name);self.root=self.base/"source";self.root.mkdir()
         (self.root/"DESKTOP-CANDIDATE.md").write_text("Synthetic candidate")
+        (self.root/"LICENSE").write_text("Synthetic application license")
         (self.root/"package.json").write_text('{"version":"0.0.0"}')
         self.build=self.base/"build";self.build.mkdir()
         self.host=self.base/"host";self.host.mkdir()
@@ -59,9 +60,16 @@ class DesktopPackagingTests(unittest.TestCase):
     def test_output_manifest_has_exact_copy_set_and_hashes(self):
         import hashlib
         path,m=self.stage()
-        self.assertEqual(len(m["files"]),len(build.HOST_FILES)+2)
+        self.assertEqual(len(m["files"]),len(build.HOST_FILES)+3)
+        self.assertEqual((path/"licenses/AgentCity-LICENSE.txt").read_text(),"Synthetic application license")
         self.assertTrue(all(hashlib.sha256((path/f["path"]).read_bytes()).hexdigest()==f["sha256"] for f in m["files"]))
         self.assertEqual(json.loads((path/"build-manifest.json").read_text())["files"],m["files"])
+
+    def test_missing_application_license_blocks_package_publication(self):
+        (self.root/"LICENSE").unlink()
+        with self.assertRaisesRegex(ValueError,"application license unavailable"):
+            self.stage()
+        self.assertFalse(any(p.name.startswith("candidate-") for p in self.build.iterdir()))
 
 
 if __name__=="__main__":unittest.main()

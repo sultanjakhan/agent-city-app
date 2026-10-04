@@ -7,9 +7,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>AgentCity</AssemblyName>
     <ApplicationIcon>AgentCity.ico</ApplicationIcon>
-    <Version>0.5.22-desktop</Version>
-    <AssemblyVersion>0.5.22.0</AssemblyVersion>
-    <FileVersion>0.5.22.0</FileVersion>
+    <Version>0.5.23-desktop</Version>
+    <AssemblyVersion>0.5.23.0</AssemblyVersion>
+    <FileVersion>0.5.23.0</FileVersion>
     <RestorePackagesPath>../../desktop-build/nuget-packages</RestorePackagesPath>
     <RestoreSources>https://api.nuget.org/v3/index.json</RestoreSources>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
