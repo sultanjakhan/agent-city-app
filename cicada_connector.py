@@ -160,7 +160,7 @@ class CicadaConnector:
             raise CicadaConnectorError("Cicada database identity changed")
         return resolved
 
-    def snapshot(self, *, task_keys: list[str] | None = None, bindings: dict | None = None) -> dict[str, Any]:
+    def snapshot(self, *, task_keys: list[str] | None = None, bindings: dict | None = None, personal_only: bool = False) -> dict[str, Any]:
         with self._lock:
             selected, _ = self._read_settings()
             row = self._find(selected)
@@ -183,7 +183,7 @@ class CicadaConnector:
                     source_ids = list(dict.fromkeys(
                         paired[key]['sourceId'] if key in paired else key[len(prefix):]
                         for key in task_keys if isinstance(key, str) and (key in paired or key.startswith(prefix))))[:500]
-                tasks = self._read_db(path, source_ids=source_ids)
+                tasks = self._read_db(path, source_ids=source_ids, personal_only=personal_only)
                 source = {"id": row["id"], "label": row["label"], "profile": row["profile"], "path": str(path), "sourceKey": source_key}
                 tasks, has_more = tasks
                 for task in tasks:
@@ -240,7 +240,7 @@ class CicadaConnector:
             return {'selectedId':selected, 'profile':candidate['profile'], 'sourceNamespace':identity['sourceNamespace']}
 
     @staticmethod
-    def _read_db(path: Path, *, source_ids: list[str] | None = None) -> tuple[list[dict[str, Any]], bool]:
+    def _read_db(path: Path, *, source_ids: list[str] | None = None, personal_only: bool = False) -> tuple[list[dict[str, Any]], bool]:
         uri = path.as_uri() + "?mode=ro"
         con = sqlite3.connect(uri, uri=True, timeout=1)
         try:
@@ -272,15 +272,19 @@ class CicadaConnector:
                 source_ids = list(dict.fromkeys(source_ids))[:500]
                 where = "i.kind='task' AND i.archived=0 AND i.id IN (" + ','.join('?' for _ in source_ids) + ')'
                 params.extend(source_ids)
+            if personal_only:
+                # Apply the personal boundary before LIMIT, including ambiguous mixed tags.
+                tokens = "(',' || lower(replace(COALESCE(i.tags,''),' ','')) || ',')"
+                where += f" AND instr({tokens},',task-sphere:personal,')>0 AND instr({tokens},',task-sphere:work,')=0 AND instr({tokens},',jira')=0 AND instr({tokens},',investlink')=0"
             sql = """SELECT i.id,substr(i.title,1,500),i.date,i.time,i.completed,i.updated_at,substr(i.tags,1,65536),
                      COALESCE(MAX(CASE WHEN t.is_active=1 THEN 1 ELSE 0 END),0),
                      COALESCE(SUM(CASE WHEN t.is_active=0 THEN CASE WHEN t.duration_seconds>0 THEN t.duration_seconds ELSE t.duration_minutes*60 END ELSE 0 END),0),
-                     COALESCE(MAX(CASE WHEN t.date=? THEN 1 ELSE 0 END),0), MAX(t.date || 'T' || t.start_time)
+                     COALESCE(MAX(CASE WHEN t.date=? THEN 1 ELSE 0 END),0), MAX(t.date || 'T' || t.start_time), i.version
                      FROM items i LEFT JOIN timeline_blocks t ON t.source_type='note' AND t.source_id=i.id
                      WHERE {where}
                      GROUP BY i.id ORDER BY 8 DESC,10 DESC,i.date,i.time,i.id LIMIT 501""".format(where=where)
             result = []
-            for ident, title, date, tm, completed, updated, tags, active, seconds, worked_today, latest_start in con.execute(sql, params):
+            for ident, title, date, tm, completed, updated, tags, active, seconds, worked_today, latest_start, version in con.execute(sql, params):
                 stopped = hidden.get('note:' + str(ident))
                 hidden_paused = False
                 if stopped and not active:
@@ -306,6 +310,7 @@ class CicadaConnector:
                 for entry in history:
                     entry["stageLabel"] = stage_map.get(entry["stage"]) or (_BUILTIN.get(entry["stage"]) if process == "system-analysis" else None) or entry["stage"]
                 result.append({"taskKey": "cicada-" + hashlib.sha256(str(path).encode()).hexdigest()[:16] + "-" + str(ident), "sourceId": str(ident), "title": str(title or "")[:500], "date": date, "plannedTime": tm, "completed": bool(completed), "isActive": bool(active), "isPaused": bool(worked_today and not active and not hidden_paused), "actualMinutes": int(seconds or 0) // 60, "process": process, "processLabel": p.get("title") or ("Системный анализ" if process == "system-analysis" else process), "stage": stage, "stageLabel": stage_label, "waiting": "task-waiting" in toks, "stageHistory": history[-200:], "lastUpdatedAt": updated})
+                result[-1]['version'] = version
             return result[:500], len(result) > 500
         finally:
             con.close()

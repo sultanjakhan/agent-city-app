@@ -47,6 +47,9 @@ from project_library import ProjectLibrary, ProjectLibraryError, ProjectRevision
 from project_policy import preview_policy
 from repo_inventory import RepoInventory, RepoInventoryError
 from pipeline_store import PipelineStore
+from standards_store import StandardsStore, StandardsValidationError, StandardsRevisionConflict
+import hardware_status
+import storage_map
 from pipeline_policy_adapter import preview_repository_pipeline
 from rule_store import RulesStore, RepoProfiles, RuleStoreError, RuleRevisionConflict
 from skill_activity import SkillActivity, ActivityError
@@ -366,6 +369,7 @@ class Store:
         self.projects = ProjectLibrary(self.directory / 'projects.json', seed_path=ROOT / 'data/projects.json')
         self.repos = RepoInventory(repo_roots if repo_roots is not None else [self.directory] if skills_root else storage.repository_roots)
         self.pipelines = PipelineStore(self.directory)
+        self.standards = StandardsStore(self.directory, self.repos)
         self.rules = RulesStore(self.directory, self.repos)
         self.repo_profiles = RepoProfiles(self.directory, self.repos, self.projects)
         self.activity = SkillActivity(self.directory)
@@ -465,6 +469,13 @@ class Store:
             # A settings change between reads must not join two Cicada profiles.
             historical = {'tasks': [], 'status': 'source_changed'}
         source['historyTasks'] = historical['tasks']
+        available = self.cicada.snapshot(bindings=pairs, personal_only=True)
+        if (available.get('source') or {}).get('sourceKey') != source_key:
+            available = {'tasks': [], 'status': 'source_changed'}
+        # Keep the existing current-work contract; expose idle personal tasks separately.
+        source['availableTasks'] = available['tasks']
+        source['availableStatus'] = available['status']
+        source['availableLimited'] = available.get('hasMore', False)
         source['historyStatus'] = historical['status']
         source['historyLimited'] = bool(source_key) and sum(key.startswith('cicada-'+source_key+'-') for key in keys) > 500
         known = {task['taskKey']: task for task in source['tasks']}
@@ -810,6 +821,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, self.server.store.pipelines.snapshot())
             except (ValueError, OSError):
                 return self.respond(400, {"error": "Invalid pipeline storage"})
+        if path == '/api/hardware':
+            return self.respond(200, hardware_status.snapshot(self.server.store.directory))
+        if path == '/api/storage-map':
+            try:
+                return self.respond(200, storage_map.snapshot(self.server.store))
+            except (ConnectorError, OSError, ValueError):
+                return self.respond(400, {'error': 'Не удалось прочитать расположение данных.'})
+        if path in {'/api/standards', '/api/standards/detail', '/api/standards/assignments'}:
+            params = parse_qs(urlsplit(self.path).query)
+            standards = self.server.store.standards
+            try:
+                result = (standards.detail(params.get('id', [''])[0], params.get('version', [''])[0])
+                          if path.endswith('/detail') else
+                          standards.assignments(params.get('repoId', [''])[0])
+                          if path.endswith('/assignments') else standards.snapshot())
+                return self.respond(200, result)
+            except (StandardsValidationError, OSError, ValueError):
+                return self.respond(400, {'error': 'Не удалось прочитать стандарт или проект.'})
         if path == "/api/state":
             try:
                 return self.respond(200, self.server.store.snapshot())
@@ -888,6 +917,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, {'schemaVersion': 1, 'repository': repo,
                                          'rules': store.rules.repository_rules(repo['id'] if repo else None),
                                          'extensions': [p for p in store.projects.list() if p['id'] in selected],
+                                         'standards': [store.standards.detail(ref['id'], ref['version']) for ref in store.standards.assignments(repo['id'])['standardRefs']] if repo else [],
                                          'agentReporting': public_api.reporting(),
                                          'notice': 'Extension selection is a profile, not installation or authorization to run code.'})
             except (RepoInventoryError, RuleStoreError, OSError, ValueError):
@@ -928,6 +958,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond(400, {'error': 'Не удалось прочитать skill. Проверь путь и формат файла.'})
         files = {"/": ("index.html", "text/html; charset=utf-8"),
                  "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                 "/drafts.js": ("drafts.js", "text/javascript; charset=utf-8"),
                  "/i18n.js": ("i18n.js", "text/javascript; charset=utf-8"),
                  "/workspace.js": ("workspace.js", "text/javascript; charset=utf-8"),
                  "/providers.js": ("providers.js", "text/javascript; charset=utf-8"),
@@ -942,6 +973,13 @@ class Handler(BaseHTTPRequestHandler):
                  "/owner-session.js": ("owner-session.js", "text/javascript; charset=utf-8"),
                  "/appearance.js": ("appearance.js", "text/javascript; charset=utf-8"),
                  "/shared-neutral.css": ("shared-neutral.css", "text/css; charset=utf-8"),
+                 "/release-060.css": ("release-060.css", "text/css; charset=utf-8"),
+                 "/task-workspace.js": ("task-workspace.js", "text/javascript; charset=utf-8"),
+                 "/task-workspace.css": ("task-workspace.css", "text/css; charset=utf-8"),
+                 "/standards.js": ("standards.js", "text/javascript; charset=utf-8"),
+                 "/standards.css": ("standards.css", "text/css; charset=utf-8"),
+                 "/hardware.js": ("hardware.js", "text/javascript; charset=utf-8"),
+                 "/storage-map.js": ("storage-map.js", "text/javascript; charset=utf-8"),
                  "/styles.css": ("styles.css", "text/css; charset=utf-8"),
                  "/icon.svg": ("icon.svg", "image/svg+xml")}
         if path in files:
@@ -987,7 +1025,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             path = urlsplit(self.path).path
-            limit = 2 * 1024 * 1024 if path.startswith(('/api/skills/', '/api/projects/', '/api/extensions/', '/api/rules/', '/api/data-sources/', '/api/pipelines/', '/api/work-exchange/')) else 4096
+            # A valid 8000 UTF-8-byte task result can occupy up to 48KB in
+            # escaped JSON. Keep a bounded envelope; native field limits apply.
+            limit = 64 * 1024 if path == '/api/task-sync/queue' else 2 * 1024 * 1024 if path.startswith(('/api/skills/', '/api/projects/', '/api/extensions/', '/api/rules/', '/api/data-sources/', '/api/pipelines/', '/api/work-exchange/')) else 4096
             if length < 1 or length > limit:
                 return self.respond(413, {"error": "Неверный размер запроса."})
             self.connection.settimeout(5)
@@ -1057,6 +1097,17 @@ class Handler(BaseHTTPRequestHandler):
                 if path.endswith('/preview'):
                     return self.respond(200, result)
                 return self.respond(200, self.server.store.pipelines.save(payload.get('pipeline'), payload.get('revision')))
+            if path == '/api/standards/apply':
+                if not self.csrf_authorized():
+                    return self.respond(403, {'error': 'Обнови окно перед сохранением.'})
+                if set(payload) != {'repoId', 'id', 'version', 'revision'}:
+                    return self.respond(400, {'error': 'Неверные поля назначения стандарта.'})
+                try:
+                    return self.respond(200, self.server.store.standards.apply(payload['repoId'], payload['id'], payload['version'], payload['revision']))
+                except StandardsRevisionConflict:
+                    return self.respond(409, {'error': 'Назначения изменились. Обнови данные и повтори выбор.'})
+                except StandardsValidationError:
+                    return self.respond(400, {'error': 'Не удалось назначить эту версию стандарта.'})
             if path == '/api/providers/resolve':
                 if not self.csrf_authorized():
                     return self.respond(403, {'error': 'Обнови окно приложения перед сохранением.'})

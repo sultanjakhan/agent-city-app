@@ -22,8 +22,8 @@ function dom(language){
  assert.equal($('connection-client').getAttribute('aria-label'),'Provider client');
  assert.equal($('work-registry-preview').textContent,'Preview import');
  assert.equal($('work-registry-apply').textContent,'Apply import');
- assert.equal($('project-policy-editor').querySelector('summary').textContent,'Project policy');
- assert.equal($('work-registry').querySelector('summary').textContent,'Published work registry');
+ assert.equal($('project-policy-editor').querySelector('h3').textContent,'Project policy');
+ assert.equal($('work-registry').querySelector('h3').textContent,'Published work registry');
  for(const [key,ru] of Object.entries(copy)){assert.equal(w.qaI18n.t(key),key);w.qaI18n.setLanguage('ru');assert.equal(w.qaI18n.t(key),ru);w.qaI18n.setLanguage('en');}
  let fetches=0;w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.fetch=async()=>{fetches++;throw Error('synthetic denial');};
  w.eval(read('static/owner-session.js'));await w.agentCityOwnerReady;
@@ -40,12 +40,12 @@ function dom(language){
  const envelope={kind:'snapshot',userText:'Сохранить профиль',snapshot};let calls=[];
  w.request=async(url,payload)=>{calls.push({url,payload});if(url.endsWith('/preview'))return{envelope,previewToken:'synthetic-preview',revision:7};return state;};
  w.eval(read('static/work-registry.js'));await w.renderWorkRegistry();
- assert.equal($('work-registry-tasks').querySelector('summary').textContent,rawTitle);
+ assert.equal($('work-registry-tasks').querySelector('.registry-task h4').textContent,rawTitle);
  assert.match($('work-registry-tasks').textContent,/published snapshot/);
  const requestsBeforeLanguage=calls.length;
  w.qaI18n.setLanguage('ru');assert.match($('work-registry-tasks').textContent,/опубликованный снимок/);assert.equal(calls.length,requestsBeforeLanguage);
  assert.equal(w.registryEnum('external-status'),'external-status');
- assert.equal($('work-registry-tasks').querySelector('summary').textContent,rawTitle);
+ assert.equal($('work-registry-tasks').querySelector('.registry-task h4').textContent,rawTitle);
  assert.ok($('work-registry-tasks').textContent.includes(rawOperation));assert.ok($('work-registry-tasks').textContent.includes(rawReference));
  const raw=JSON.stringify(envelope);w.TextDecoder=TextDecoder;
  Object.defineProperty($('work-registry-file'),'files',{value:[{size:raw.length,arrayBuffer:async()=>Buffer.from(raw)}]});

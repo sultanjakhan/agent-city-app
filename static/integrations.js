@@ -1,5 +1,6 @@
 'use strict';
 let repoRows=null,repoLoading=false,currentRepo=null,repoSaving=false;
+let repoStandardsReturn=null,repoStandardsEpoch=0;
 let ruleCurrent=null,rulePreview=null,ruleSaving=false,ruleLoading=false,bridgeState=null,bridgeLoading=false,ruleContext=null;
 
 async function getRepos(refresh=false){
@@ -16,6 +17,7 @@ async function renderRepos(){
   }
   if(!list.children.length)list.append(el('p','','Репозитории не найдены'));
   $('repos-error').hidden=true;
+  if(repoStandardsReturn===currentRepo?.id){repoStandardsReturn=null;void renderRepoStandards(currentRepo.id);$('repo-dialog').showModal();}
  }catch(e){$('repos-error').hidden=false;$('repos-error').textContent=t(e.message);}finally{repoLoading=false;}
 }
 async function openRepo(id){
@@ -26,14 +28,30 @@ async function openRepo(id){
   const list=$('repo-extensions');list.replaceChildren();
   for(const item of extensions.projects){const label=el('label','repo-extension'),input=el('input');input.type='checkbox';input.value=item.id;input.checked=currentRepo.profile.extensionIds.includes(item.id);label.append(input,el('span','',item.name,true));list.append(label);}
   $('repo-instructions').replaceChildren();
-  for(const item of currentRepo.instructionContents||[]){const detail=el('details');detail.append(el('summary','',item.path,true),el('pre','instruction-text',item.content,true));$('repo-instructions').append(detail);}
+  for(const item of currentRepo.instructionContents||[]){const detail=el('section','repo-instruction');detail.append(el('h4','',item.path,true),el('pre','instruction-text',item.content,true));$('repo-instructions').append(detail);}
   const policy=currentRepo.profile.policy||{};
   for(const [id,key] of [['instructions','instructions'],['sources','sourceIds'],['allowed','allowedActions'],['denied','deniedActions'],['pipeline','defaultPipelineId']]){const value=policy[key];$('project-policy-'+id).value=Array.isArray(value)?value.join('\n'):(value||'');}
   $('project-policy-preview').textContent='';$('project-policy-pipeline-preview').value='';$('project-policy-stage-preview').value='';
-  $('repo-dialog').showModal();
+  $('repo-dialog').showModal();void renderRepoStandards(currentRepo.id);
  }catch(e){toast(e.message);}
 }
+async function renderRepoStandards(id){
+ const epoch=++repoStandardsEpoch,list=$('repo-standard-refs');list.replaceChildren(el('p','section-description','Загрузка…'));
+ try{
+  const value=await request('/api/standards/assignments?repoId='+encodeURIComponent(id));
+  if(epoch!==repoStandardsEpoch||currentRepo?.id!==id)return;
+  list.replaceChildren();
+  if(value.standardRefs.length){const refs=el('ul','repo-standard-refs');for(const ref of value.standardRefs)refs.append(el('li','',ref.id+' · v'+ref.version,true));list.append(refs);}
+  else list.append(el('p','section-description','Стандарты не назначены'));
+ }catch(error){if(epoch!==repoStandardsEpoch||currentRepo?.id!==id)return;const message=el('p','notice',error.message);message.setAttribute('role','alert');list.replaceChildren(message);}
+}
+async function openRepoStandards(){
+ if(repoSaving||!currentRepo)return;
+ const id=currentRepo.id;repoStandardsReturn=id;$('repo-dialog').close();setView('standards');
+ await window.AgentCityStandards.selectRepository(id);
+}
 $('repos-search').addEventListener('input',renderRepos);
+$('open-repo-standards').addEventListener('click',openRepoStandards);
 $('close-repo').addEventListener('click',()=>{if(!repoSaving)$('repo-dialog').close();});
 $('save-repo-profile').addEventListener('click',async()=>{
  if(repoSaving||!currentRepo)return;repoSaving=true;$('save-repo-profile').disabled=true;
@@ -75,7 +93,7 @@ function renderRuleSources(){
  }
  $('rules-native-section').hidden=!scoped;
  const native=$('rules-native');native.replaceChildren();
- for(const item of ruleContext.repo?.instructionContents||[]){const detail=el('details');detail.append(el('summary','',item.path,true),el('pre','instruction-text',item.content,true));native.append(detail);}
+ for(const item of ruleContext.repo?.instructionContents||[]){const detail=el('section','repo-instruction');detail.append(el('h4','',item.path,true),el('pre','instruction-text',item.content,true));native.append(detail);}
  if(scoped&&!native.childElementCount)native.append(el('p','','Файлы инструкций не найдены'));
 }
 function renderBridgeStatus(){

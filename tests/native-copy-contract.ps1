@@ -16,6 +16,7 @@ if ($Contract -eq 'Host') {
     & python (Join-Path $PSScriptRoot 'native_host_wiring_contract.py') --output $generated
     if ($LASTEXITCODE -ne 0) { throw 'Host source contract failed' }
     $sources += (Join-Path $PSScriptRoot '..\desktop\DesktopLocale.cs')
+    $sources += (Join-Path $PSScriptRoot '..\desktop\DesktopDrafts.cs')
     $sources += $generated
 } elseif ($Contract -eq 'Locale') {
     $sources += (Join-Path $PSScriptRoot '..\desktop\DesktopLocale.cs')

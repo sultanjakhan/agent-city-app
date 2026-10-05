@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION='0.5.24';
+const UI_VERSION='0.6.0';
 const t=I18n.t;
 I18n.init();
 const $ = id => document.getElementById(id);
@@ -9,10 +9,16 @@ const needsKey = source => source.keyRequired ?? Boolean(source.keyUrl);
 let state, view='dashboard', filter='all', selected, keyProvider, keyAction, timer, toastTimer;
 let providerStateEpoch=0;
 const navStorageKey='agentcity-nav-collapsed';
+const primaryLabels={dashboard:'Дашборд',tasks:'Задачи',models:'Модели',providers:'Провайдеры',extensions:'Расширения',projects:'Проекты',architecture:'Архитектура',hardware:'Железо',settings:'Настройки'};
+const primaryDefaults={models:'codexbar',providers:'connections',projects:'repos'};
+function primaryView(v){return ({codexbar:'models',connections:'providers',skills:'extensions',repos:'projects',rules:'projects',standards:'architecture',storage:'architecture'})[v]||v;}
+function setPrimaryView(v){setView(primaryDefaults[v]||v);}
 function syncNavOverlay(){
   const open=matchMedia('(max-width: 520px)').matches&&!document.body.classList.contains('nav-collapsed');
   document.querySelector('main').inert=open;
   if($('nav-backdrop'))$('nav-backdrop').hidden=!open;
+  const sidebar=document.querySelector('aside');sidebar.inert=matchMedia('(max-width: 520px)').matches&&!open;
+  const menu=$('open-nav');if(menu)menu.setAttribute('aria-expanded',String(open));
 }
 function setNavCollapsed(collapsed){
   document.body.classList.toggle('nav-collapsed',collapsed);
@@ -23,6 +29,7 @@ function setNavCollapsed(collapsed){
   const label=t(collapsed?'Развернуть меню':'Свернуть меню');
   toggle.setAttribute('aria-expanded',String(!collapsed));toggle.setAttribute('aria-label',label);toggle.title=label;
   const text=toggle.querySelector('span');if(text)text.textContent=collapsed?'Развернуть':'Свернуть';
+  if(collapsed&&matchMedia('(max-width: 520px)').matches&&document.querySelector('aside').contains(document.activeElement))$('open-nav')?.focus();
 }
 let navTooltip=null,navTooltipOwner=null;
 function hideNavTooltip(){if(navTooltip)navTooltip.hidden=true;navTooltipOwner?.removeAttribute('aria-describedby');navTooltipOwner=null;}
@@ -34,22 +41,27 @@ function initNav(){
   navTooltip=el('div','nav-tooltip');navTooltip.id='nav-tooltip';navTooltip.setAttribute('role','tooltip');navTooltip.hidden=true;document.body.append(navTooltip);
   for(const button of document.querySelectorAll('aside [data-view]')){button.addEventListener('mouseenter',()=>showNavTooltip(button));button.addEventListener('mouseleave',hideNavTooltip);button.addEventListener('focus',()=>showNavTooltip(button));button.addEventListener('blur',hideNavTooltip);button.addEventListener('click',hideNavTooltip);}
   window.addEventListener('resize',hideNavTooltip);document.querySelector('aside nav').addEventListener('scroll',hideNavTooltip);
-  const compact={architecture:'Схема',dashboard:'Главная',models:'Модели',connections:'API',skills:'Навыки',extensions:'Дополн.',repos:'Проекты',rules:'Правила',codexbar:'Лимиты',settings:'Опции'};
-  for(const button of document.querySelectorAll('[data-view]')){const label=el('small','compact-label',compact[button.dataset.view]);button.append(label);}
+  for(const button of document.querySelectorAll('aside [data-view]')){const label=el('small','compact-label',primaryLabels[button.dataset.view]);button.append(label);}
 
   const backdrop=el('button','nav-backdrop');backdrop.id='nav-backdrop';backdrop.setAttribute('aria-label',t('Закрыть меню'));backdrop.hidden=true;backdrop.addEventListener('click',()=>setNavCollapsed(true));document.querySelector('main').before(backdrop);
   let collapsed=matchMedia('(max-width: 680px)').matches;
-  try{const saved=localStorage.getItem(navStorageKey)??sessionStorage.getItem(navStorageKey);if(saved!==null)collapsed=saved==='1';}catch{}
+  try{const saved=localStorage.getItem(navStorageKey)??sessionStorage.getItem(navStorageKey);if(saved!==null&&!matchMedia('(max-width: 520px)').matches)collapsed=saved==='1';}catch{}
   setNavCollapsed(collapsed);
-  matchMedia('(max-width: 520px)').addEventListener('change',syncNavOverlay);
+  matchMedia('(max-width: 520px)').addEventListener('change',event=>{if(event.matches)setNavCollapsed(true);else syncNavOverlay();});
 }
-const titles = {architecture:['Архитектура','Технические пайплайны'],dashboard:['Дашборд',''],models:['Модели','Проверяй доступ и выбирай, чем пользоваться.'], connections:['Подключения','API и инструменты, которые дают доступ к моделям.'], codexbar:['Лимиты','Данные подписок из CodexBar.'],settings:['Настройки',''],skills:['Навыки',''],extensions:['Расширения',''],repos:['Проекты',''],rules:['Правила','']};
-if(Object.hasOwn(titles,location.hash.slice(1)))view=location.hash.slice(1);
+const titles = {architecture:['Архитектура',''],standards:['Архитектура',''],storage:['Архитектура',''],dashboard:['Дашборд',''],tasks:['Задачи',''],models:['Модели',''],connections:['Провайдеры',''],codexbar:['Модели',''],settings:['Настройки',''],skills:['Расширения',''],extensions:['Расширения',''],repos:['Проекты',''],rules:['Проекты',''],hardware:['Железо','']};
+const viewAliases={providers:'connections',projects:'repos'};
+const initialView=viewAliases[location.hash.slice(1)]||location.hash.slice(1);
+if(Object.hasOwn(titles,initialView))view=initialView;
 function el(tag,cls,text,raw=false){const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=raw?text:t(text);return n;}
 function age(v){const n=Date.parse(v);return Number.isFinite(n)?Math.max(0,(Date.now()-n)/1000):Infinity;}
 function when(v){return Number.isFinite(Date.parse(v))?new Date(v).toLocaleString(I18n.locale,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):t('ещё не проверяли');}
 function toast(text){$('toast').textContent=t(text);$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,3500);}
-async function request(path,body){if(window.agentCityOwnerReady&&!(await window.agentCityOwnerReady))throw Error('Откройте Agent City через launcher.');const epoch=providerStateEpoch;const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json','X-Agent-City':'1','X-Agent-City-Token':state?.csrfToken||''},body:JSON.stringify(body)}:{});const data=await r.json();if(!r.ok){if(r.status===401&&window.agentCityOwnerDenied)window.agentCityOwnerDenied();const error=Error(data.error||'Не удалось выполнить запрос');error.status=r.status;throw error;}if(data.providerRegistry&&epoch!==providerStateEpoch)return state;return data;}
+async function request(path,body){
+ const draft=body?window.agentCityDrafts?.begin(path,body):null;let saved=false;
+ try{if(window.agentCityOwnerReady&&!(await window.agentCityOwnerReady))throw Error('Откройте Agent City через launcher.');const epoch=providerStateEpoch;const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json','X-Agent-City':'1','X-Agent-City-Token':state?.csrfToken||''},body:JSON.stringify(body)}:{});const data=await r.json();if(!r.ok){if(r.status===401&&window.agentCityOwnerDenied)window.agentCityOwnerDenied();const error=Error(data.error||'Не удалось выполнить запрос');error.status=r.status;throw error;}saved=true;if(data.providerRegistry&&epoch!==providerStateEpoch)return state;return data;}
+ finally{window.agentCityDrafts?.end(draft,saved);}
+}
 function replied(check){return ['ok','mismatch'].includes(check?.status)&&!!check?.reply&&check?.finishReason==='stop';}
 function status(route){
   const c=route.check;
@@ -74,7 +86,14 @@ function models(){
 }
 function clientCompatibility(m){return m.kind==='structured'?'api':m.routes.some(r=>sourceFor(r.provider)?.clientIds?.length)?'client':'unknown';}
 function quotaRows(){return (state.codexbar?.providers||[]).map(r=>({...r,windows:(r.windows||[]).filter(w=>!['session','primary'].includes(w.kind)&&!/^сессия$|^session$/i.test(w.label||'')&&(Number.isFinite(w.remainingPercent)||w.resetAt))})).filter(r=>r.windows.length);}
-function setView(v){if(!Object.hasOwn(titles,v))return;if(v==='repos'&&view!=='repos')repoRows=null;view=v;history.replaceState(null,'','#'+v);if(matchMedia('(max-width: 520px)').matches)setNavCollapsed(true);render();}
+function setView(v){
+  v=viewAliases[v]||v;if(!Object.hasOwn(titles,v))return;
+  if(window.AgentCityTasks?.onNavigate(view,v)===false){history.replaceState(null,'','#'+view);return;}
+  if(v==='repos'&&view!=='repos')repoRows=null;
+  view=v;history.replaceState(null,'','#'+v);
+  if(matchMedia('(max-width: 520px)').matches)setNavCollapsed(true);
+  render();
+}
 window.addEventListener('hashchange',()=>setView(location.hash.slice(1)||'dashboard'));
 function render(){
   if(!state)return;
@@ -82,26 +101,28 @@ function render(){
   $("local-mode-notice").hidden=!localOnly;
   $("local-mode-notice").textContent=I18n.language==="en"?"Local-only: cloud, keys and network checks are temporarily disabled.":"Только локально: облако, ключи и сетевые проверки временно отключены.";
   showUpdate(state.settings?.version);
-  $('limits-nav').hidden=!quotaRows().length;
   $('app-version').textContent='v'+(state.settings?.version||UI_VERSION);$('app-version').title=t('Версия приложения')+' '+(state.settings?.version||UI_VERSION);
-  for(const b of document.querySelectorAll('[data-view]')){const labels={architecture:'Схема',dashboard:'Главная',models:'Модели',connections:'API',skills:'Навыки',extensions:'Дополн.',repos:'Проекты',rules:'Правила',codexbar:'Лимиты',settings:'Опции'};b.querySelector('.compact-label').textContent=t(labels[b.dataset.view]);}
-  if(view==='codexbar'&&$('limits-nav').hidden)view='connections';
+  for(const b of document.querySelectorAll('aside [data-view]'))b.querySelector('.compact-label').textContent=t(primaryLabels[b.dataset.view]);
   const providerFilter=$('provider-filter'),previousProvider=providerFilter.value;
   providerFilter.replaceChildren(new Option(t('Любой API'),'all'),...(state.sources||[]).map(s=>new Option(s.name,s.id)));
   providerFilter.value=[...providerFilter.options].some(o=>o.value===previousProvider)?previousProvider:'all';
   document.querySelector('.page-header').classList.toggle('connection-header',view==='connections');document.querySelector('.connection-checks').hidden=view!=='connections';
   if(document.body.classList.contains('nav-collapsed'))for(const button of document.querySelectorAll('aside [data-view]'))button.removeAttribute('title');
-  $('page-title').textContent=t(titles[view][0]);$('page-description').textContent=view==='architecture'?'Технические пайплайны Agent City':t(titles[view][1]);
-  for(const button of document.querySelectorAll('[data-view]')){button.classList.toggle('active',button.dataset.view===view);button.setAttribute('aria-current',button.dataset.view===view?'page':'false');}
+  $('page-title').textContent=t(titles[view][0]);$('page-title').hidden=['dashboard','tasks','hardware','storage'].includes(view);$('page-description').hidden=true;
+  document.body.dataset.view=view;document.body.dataset.primaryView=primaryView(view);
+  for(const button of document.querySelectorAll('aside [data-view]')){const active=button.dataset.view===primaryView(view);button.classList.toggle('active',active);button.setAttribute('aria-current',active?'page':'false');}
+  for(const tabs of document.querySelectorAll('[data-section-tabs]'))tabs.hidden=tabs.dataset.sectionTabs!==primaryView(view);
+  for(const button of document.querySelectorAll('[data-section-view]')){const active=button.dataset.sectionView===view;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;}
   $('architecture-view').hidden=view!=='architecture';
+  $('architecture-standards-view').hidden=view!=='standards';$('architecture-storage-view').hidden=view!=='storage';$('hardware-view').hidden=view!=='hardware';$('tasks-view').hidden=view!=='tasks';
   $('dashboard-view').hidden=view!=='dashboard';$('catalog-view').hidden=view!=='models';$('connections-view').hidden=view!=='connections';$('codexbar-view').hidden=view!=='codexbar';
-  $('settings-view').hidden=view!=='settings';$('skills-view').hidden=view!=='skills';$('extensions-view').hidden=view!=='extensions';$('repos-view').hidden=view!=='repos';$('rules-view').hidden=view!=='rules';$('refresh').hidden=['settings','skills','rules','architecture'].includes(view);
-  const busy=view!=='dashboard'&&(state.busy||[]).some(x=>view==='codexbar'?x==='codexbar':x!=='codexbar'&&x!=='check');
-  const refreshLabel=t(busy?'Обновление…':view==='dashboard'?'Обновить задачи':view==='codexbar'?'Обновить лимиты':['extensions','repos'].includes(view)?'Обновить библиотеку':'Обновить каталоги');
+  $('settings-view').hidden=view!=='settings';$('skills-view').hidden=view!=='skills';$('extensions-view').hidden=view!=='extensions';$('repos-view').hidden=view!=='repos';$('rules-view').hidden=view!=='rules';$('refresh').hidden=['settings','skills','rules','architecture','standards','hardware','storage'].includes(view);
+  const busy=!['dashboard','tasks','hardware','storage'].includes(view)&&(state.busy||[]).some(x=>view==='codexbar'?x==='codexbar':x!=='codexbar'&&x!=='check');
+  const refreshLabel=t(busy?'Обновление…':['dashboard','tasks'].includes(view)?'Обновить задачи':view==='codexbar'?'Обновить лимиты':['hardware','storage'].includes(view)?'Обновить данные':['extensions','repos'].includes(view)?'Обновить библиотеку':'Обновить каталоги');
   $('refresh').disabled=busy||(localOnly&&['models','connections','codexbar'].includes(view));$('refresh-label').textContent=t(refreshLabel);$('refresh').setAttribute('aria-label',refreshLabel);$('refresh').title=refreshLabel;
   const failed=Object.entries(state.catalogs||{}).filter(([,c])=>c.error).map(([p])=>providerName(p));
   $('notice').hidden=view!=='connections'||!failed.length;$('notice').textContent=t('Не удалось обновить: {providers}. Подробности — в карточках провайдеров.',{providers:failed.join(', ')});
-  if(view==='architecture')renderPipelineEditor();else if(view==='dashboard')renderDashboard();else if(view==='models')renderModels();else if(view==='connections')renderConnections();else if(view==='codexbar')renderBar();else if(view==='settings')renderSettings();else if(view==='skills')renderSkills();else if(view==='extensions')renderProjects();else if(view==='repos')renderRepos();else if(view==='rules')renderRules();
+  if(view==='architecture')renderPipelineEditor();else if(view==='standards')window.AgentCityStandards?.render();else if(view==='storage')window.AgentCityStorage?.render();else if(view==='hardware')window.AgentCityHardware?.render();else if(view==='tasks')window.AgentCityTasks?.render();else if(view==='dashboard')renderDashboard();else if(view==='models')renderModels();else if(view==='connections')renderConnections();else if(view==='codexbar')renderBar();else if(view==='settings')renderSettings();else if(view==='skills')renderSkills();else if(view==='extensions')renderProjects();else if(view==='repos')renderRepos();else if(view==='rules')renderRules();
   if(typeof maybeDataOnboarding==='function')maybeDataOnboarding();
   if(selected&&$('model-dialog').open)renderDialog();
   clearTimeout(timer);if(state.busy?.length)timer=setTimeout(load,900);
@@ -292,7 +313,7 @@ function openKey(provider){
   if(state.settings?.localOnly){toast('Работа с ключами приостановлена в local-only');return;}
   if(keyAction){toast('Дождись сохранения ключа');return;}
   keyProvider=provider;const source=state.sources.find(s=>s.id===provider),info=state.credentialInfo?.[provider]||{};
-  $('key-title').textContent=source.name;$('api-key').value='';$('key-error').hidden=true;
+  $('key-title').textContent=source.name;$('api-key').value='';$('api-key').dataset.draftProvider=source.id;$('key-error').hidden=true;
   $('key-account').href=source.keyUrl;$('key-terms').textContent=t(source.terms||'Сохранение ключа не отправляет запросы к модели. После обновления каталога проверку можно запустить в её карточке.');
   $('key-current').textContent=t(info.source==='environment'?'Сейчас используется ключ из окружения. Сохранённый здесь ключ получит приоритет.':info.available?'Ключ уже найден на компьютере. Можно заменить его новым.':'Создай ключ в аккаунте провайдера и вставь в поле ниже.');
   $('save-key').disabled=info.canSave===false;$('api-key').disabled=info.canSave===false;
@@ -307,7 +328,7 @@ async function changeKey(action){
   keyAction=action;
   const button=action==='save'?$('save-key'):$('remove-key');button.disabled=true;$('key-error').hidden=true;
   try{const body={provider,action};if(action==='save')body.key=$('api-key').value.trim();
-    state=await request('/api/credential',body);if(keyProvider===provider){$('api-key').value='';$('key-dialog').close();render();}
+    state=await request('/api/credential',body);if(keyProvider===provider){$('api-key').value='';window.agentCityDrafts?.reset($('api-key'));$('key-dialog').close();render();}
     toast(action==='save'?'Ключ сохранён. Обновляю каталог.':'Сохранённый ключ удалён');
     if(action==='save')await refreshSource(provider);
   }catch(e){if(keyProvider===provider){$('key-error').textContent=t(e.message);$('key-error').hidden=false;button.disabled=false;if(!$('key-dialog').open)toast(e.message);}}
@@ -341,7 +362,11 @@ function renderDialog(){
 }
 async function favorite(id,enabled){try{state=await request('/api/favorite',{id,enabled});render();}catch(e){toast(e.message);}}
 async function load(){const epoch=providerStateEpoch;try{state=await request('/api/state');render();}catch{if(epoch!==providerStateEpoch)return;$('notice').hidden=false;$('notice').textContent=t('Приложение не отвечает. Запусти Agent City заново.');clearTimeout(timer);timer=setTimeout(load,5000);}}
-document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.view)));
+document.querySelectorAll('aside [data-view]').forEach(b=>b.addEventListener('click',()=>setPrimaryView(b.dataset.view)));
+for(const tab of document.querySelectorAll('[data-section-view]')){
+  tab.addEventListener('click',()=>setView(tab.dataset.sectionView));
+  tab.addEventListener('keydown',event=>{const tabs=[...tab.parentElement.querySelectorAll('[data-section-view]')],index=tabs.indexOf(tab);let target;if(event.key==='ArrowDown')target=tabs[(index+1)%tabs.length];if(event.key==='ArrowUp')target=tabs[(index+tabs.length-1)%tabs.length];if(event.key==='Home')target=tabs[0];if(event.key==='End')target=tabs.at(-1);if(target){event.preventDefault();setView(target.dataset.sectionView);target.focus();}});
+}
 initNav();
 $('language').value=I18n.language;
 $('language').addEventListener('change',()=>{I18n.setLanguage($('language').value);setNavCollapsed(document.body.classList.contains('nav-collapsed'));$('nav-backdrop').setAttribute('aria-label',t('Закрыть меню'));render();});
@@ -350,8 +375,10 @@ $('search').addEventListener('input',()=>state&&renderModels());for(const id of 
 function clearFilters(){$('search').value='';$('china-filter').checked=false;$('provider-filter').value='all';$('vscode-filter').value='all';render();}
 $('reset-filters').addEventListener('click',clearFilters);$('clear-filters').addEventListener('click',clearFilters);
 $('toggle-filters').addEventListener('click',()=>{const open=$('filter-panel').hidden;$('filter-panel').hidden=!open;$('toggle-filters').setAttribute('aria-expanded',String(open));});
-$('refresh').addEventListener('click',async()=>{if(view==='dashboard'){await loadDashboard(true);return;}if(view==='extensions'){projectsSnapshot=null;await renderProjects();return;}if(view==='repos'){repoRows=null;await renderRepos();return;}try{state=await request('/api/refresh',{target:view==='codexbar'?'codexbar':'catalog'});render();}catch(e){toast(e.message);}});
+$('refresh').addEventListener('click',async()=>{if(view==='dashboard'){await loadDashboard(true);return;}if(view==='tasks'){await window.AgentCityTasks?.load(true);return;}if(view==='hardware'){await window.AgentCityHardware?.load(true);return;}if(view==='storage'){await window.AgentCityStorage?.load(true);return;}if(view==='extensions'){projectsSnapshot=null;await renderProjects();return;}if(view==='repos'){repoRows=null;await renderRepos();return;}try{state=await request('/api/refresh',{target:view==='codexbar'?'codexbar':'catalog'});render();}catch(e){toast(e.message);}});
 $('toggle-nav').addEventListener('click',()=>{const collapsed=!document.body.classList.contains('nav-collapsed');setNavCollapsed(collapsed);try{localStorage.setItem(navStorageKey,collapsed?'1':'0');}catch{}});
+$('open-nav').addEventListener('click',()=>{setNavCollapsed(false);document.querySelector('aside [aria-current="page"]')?.focus();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&matchMedia('(max-width: 520px)').matches&&!document.body.classList.contains('nav-collapsed')){setNavCollapsed(true);$('open-nav').focus();}});
 $('close-dialog').addEventListener('click',()=>$('model-dialog').close());$('dialog-favorite').addEventListener('click',()=>favorite(selected,!state.favorites.includes(selected)));
 $('copy-id').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(selected);toast('ID скопирован');}catch{toast('Выдели и скопируй ID вручную');}});
 $('connection-search').addEventListener('input',()=>state&&renderConnections());$('connection-client').addEventListener('change',()=>state&&renderConnections());
@@ -389,13 +416,13 @@ $('cancel-checks').addEventListener('click',async()=>{try{state=await request('/
 function inlineKeyForm(source,info,existing){
  if(existing){const input=existing.querySelector('input');input.disabled=info.canSave===false;existing.querySelector('button').disabled=info.canSave===false;input.placeholder=t(info.available?'Новый ключ для замены':'Вставь ключ сюда');input.setAttribute('aria-label',t('API-ключ')+' '+source.name);existing.querySelector('label').firstChild.nodeValue=t('API-ключ')+' · '+source.name;existing.querySelector('button').textContent=t('Сохранить и подключить');existing.querySelector('a').textContent=t('Получить API-ключ ↗');existing.querySelector('.inline-key-message').textContent=t(existing.dataset.notice||'');return existing;}
  const form=el('form','inline-key-form');form.dataset.keyProvider=source.id;form.autocomplete='off';
- const label=el('label','',t('API-ключ')+' · '+source.name),input=el('input');input.type='password';input.autocomplete='new-password';input.minLength=20;input.maxLength=2048;input.required=true;input.spellcheck=false;input.placeholder=t(info.available?'Новый ключ для замены':'Вставь ключ сюда');input.setAttribute('aria-label',t('API-ключ')+' '+source.name);input.disabled=info.canSave===false;label.append(input);
+ const label=el('label','',t('API-ключ')+' · '+source.name),input=el('input');input.type='password';input.dataset.draftProvider=source.id;input.autocomplete='new-password';input.minLength=20;input.maxLength=2048;input.required=true;input.spellcheck=false;input.placeholder=t(info.available?'Новый ключ для замены':'Вставь ключ сюда');input.setAttribute('aria-label',t('API-ключ')+' '+source.name);input.disabled=info.canSave===false;label.append(input);
  const button=el('button','primary','Сохранить и подключить');button.type='submit';button.disabled=info.canSave===false;
  const message=el('p','inline-key-message');message.setAttribute('role','status');
  form.append(label,button,link('Получить API-ключ ↗',source.keyUrl),message);
  const showMessage=text=>{form.dataset.notice=text;message.textContent=t(text);};
  form.addEventListener('submit',async e=>{e.preventDefault();if(keyAction){showMessage('Дождись сохранения ключа');return;}keyAction='inline';button.disabled=true;input.disabled=true;showMessage('Сохранение…');
-  try{state=await request('/api/credential',{provider:source.id,action:'save',key:input.value.trim()});input.value='';showMessage('Ключ сохранён. Обновляю каталог.');await refreshSource(source.id);}
+  try{state=await request('/api/credential',{provider:source.id,action:'save',key:input.value.trim()});input.value='';window.agentCityDrafts?.reset(input);showMessage('Ключ сохранён. Обновляю каталог.');await refreshSource(source.id);}
   catch(e){showMessage(e.message);}finally{keyAction=null;button.disabled=info.canSave===false;input.disabled=info.canSave===false;}
  });return form;
 }

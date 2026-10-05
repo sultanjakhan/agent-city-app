@@ -34,7 +34,7 @@ def make_cicada(path, title):
     db.execute("INSERT INTO items VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                ("shared-task", "task", title, "private notes must not leave Cicada", "2026-09-27", "09:00",
                 20, 0, 1, "created", "updated", "general", "", 0, 0,
-                "task-process:custom,task-stage:analysis,task-stage-log:analysis@2026-09-27T08:00:00Z",
+                "task-sphere:personal,task-process:custom,task-stage:analysis,task-stage-log:analysis@2026-09-27T08:00:00Z",
                 None, "task"))
     db.execute("INSERT INTO ui_state VALUES(?,?,?)", ("calendar_processes_v1", '{"processes":[]}', "now"))
     db.execute("INSERT INTO timeline_blocks(id,source_type,source_id,date,start_time,is_active) VALUES(1,'note',?,'2026-09-27','09:00',1)", ("shared-task",))

@@ -9,7 +9,7 @@ namespace AgentCityDesktop;
 // Local, current OS account authority. No browser grants or credentials leave the host.
 internal sealed class AgentPipe : IDisposable
 {
-    private const int RequestLimit = 16000, ReplyLimit = 1024 * 1024;
+    private const int RequestLimit = 64 * 1024, ReplyLimit = 1024 * 1024;
     private readonly string name;
     private readonly Func<JsonElement, Task<JsonElement>> dispatch;
     private readonly CancellationTokenSource stop = new();
