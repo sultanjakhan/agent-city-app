@@ -3,7 +3,7 @@ const id='a'.repeat(32),other='b'.repeat(32);
 const snapshot=page=>page.evaluate(()=>window.agentCityDrafts.snapshot());
 async function editor(page){await page.goto('/');await page.evaluate(()=>document.getElementById('skill-dialog').showModal());return page.locator('#skill-content');}
 test('clean documents and search filters close without a prompt; close rollback restores interaction',async({page})=>{
- await page.goto('/');await page.locator('#dashboard-search').fill('search is not a draft');
+ await page.goto('/#tasks');await page.locator('#tasks-search').fill('search is not a draft');
  expect(await snapshot(page)).toEqual({version:1,dirty:false,busy:false});
  expect(await page.evaluate(id=>window.agentCityDrafts.request(id,'close',false),id)).toBe('clean');
  await expect(page.locator('#unsaved-changes-dialog')).toHaveCount(0);

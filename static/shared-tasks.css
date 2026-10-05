@@ -33,15 +33,13 @@
 .task-widget .task-widget-main p{margin:3px 0 0;font-size:12px;line-height:1.5;overflow-wrap:anywhere;color:var(--secondary)}
 .task-widget .task-widget-main .task-stage{color:var(--ink);font-size:13px}
 .task-widget .task-widget-status{font-size:12px;line-height:1.4;padding:4px 9px;border-radius:6px;max-width:210px;white-space:normal;background:var(--soft);color:var(--secondary)}
-.task-widget .task-widget-status.review{background:#f8f3e7;color:#866424}
-.task-widget .task-widget-status.accepted{background:#edf5ef;color:#38644d}
+.task-widget .task-widget-status.review{background:var(--ac-amber-bg);color:var(--ac-amber)}
+.task-widget .task-widget-status.accepted{background:var(--ac-green-bg);color:var(--ac-green)}
 .task-widget .task-widget-status.warn{background:var(--red-bg);color:var(--ink)}
 .task-widget .task-widget-status.active{background:var(--soft);color:var(--ink)}
 .task-widget-status.active::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:6px;vertical-align:middle}
 .task-exchange-status{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:var(--secondary);border-bottom:1px solid var(--line);padding:0 0 8px;margin-bottom:4px}
 .task-exchange-status .text-button{font-size:12px;min-height:44px;flex-shrink:0}
-:root[data-theme="dark"] .task-widget-status.review{background:#3d3422;color:#dcc389}
-:root[data-theme="dark"] .task-widget-status.accepted{background:#273c30;color:#acd1b8}
 .task-widget-open{width:44px;min-height:44px;padding:10px;border:0;border-radius:8px;background:transparent;color:var(--muted);display:grid;place-items:center}
 .task-widget-open svg{width:16px;height:16px}
 .task-widget-open:hover{background:var(--soft);color:var(--ink)}

@@ -1,0 +1,43 @@
+.standards-workspace { min-width: 0; padding-bottom: 32px; }
+.standards-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.standards-heading h2 { margin: 0; }
+.standards-layout { display: grid; grid-template-columns: minmax(180px,240px) minmax(0,1fr); gap: 32px; }
+.standards-list { display: flex; flex-direction: column; align-self: start; min-width: 0; gap: 4px; }
+.standard-choice { width: 100%; min-height: 44px; padding: 12px; border: 0; background: transparent; text-align: left; overflow-wrap: anywhere; }
+.standard-choice:hover, .standard-action:hover { background: var(--hover); }
+.standard-choice[aria-pressed="true"] { background: var(--soft); }
+.standard-choice[aria-pressed="true"] .standard-choice-name { font-weight: 650; }
+.standard-choice-name, .standard-meta { display: block; }
+.standard-choice-name { margin-bottom: 4px; }
+.standard-meta { font-size: 13px; color: var(--secondary); font-variant-numeric: tabular-nums; }
+.standard-body { min-width: 0; max-width: 75ch; }
+.standard-title { margin: 0 0 6px; }
+.standard-description { margin: 20px 0 8px; }
+.standard-draft-note { margin: 0 0 16px; color: var(--secondary); font-size: 14px; }
+.standard-rules { margin: 20px 0; padding-left: 22px; }
+.standard-rules li { padding-left: 3px; margin: 10px 0; overflow-wrap: anywhere; }
+.standard-origin { font-size: 13px; color: var(--secondary); margin: 20px 0 0; }
+.standard-assignment { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line); }
+.standard-assignment h3 { margin: 0 0 12px; }
+.standard-apply-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.standard-project-field { display: grid; gap: 6px; min-width: 0; flex: 1 1 220px; font-size: 14px; }
+.standard-project-field select { width: 100%; min-width: 0; min-height: 44px; border: 1px solid var(--line); background: var(--bg); padding: 8px 12px; }
+.standard-action { min-height: 44px; padding: 10px 12px; border: 0; background: transparent; color: var(--ink); }
+.standard-apply { background: var(--soft); }
+.standard-action:disabled, .standard-choice:disabled, .standard-project-field select:disabled { cursor: default; }
+.standard-assignment-note { color: var(--secondary); font-size: 13px; margin: 12px 0 0; }
+.standard-references { font-size: 14px; margin: 16px 0 0; padding-left: 20px; overflow-wrap: anywhere; }
+.standard-references li { margin-top: 6px; }
+.standard-status, .standard-error { font-size: 14px; margin: 16px 0; overflow-wrap: anywhere; }
+.standard-error { color: var(--ink); }
+.standards-workspace :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+@media(max-width: 760px) {
+ .standards-layout { grid-template-columns: minmax(0,1fr); gap: 24px; }
+ .standards-list { padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+ .standard-choice { padding: 10px 8px; }
+ .standard-body { max-width: none; }
+}
+@media(max-width: 390px) {
+ .standards-heading { align-items: start; gap: 8px; }
+ .standard-project-field { flex-basis: 100%; }
+}

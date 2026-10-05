@@ -1,10 +1,10 @@
 {
   "name": "agent-city-panel-checks",
   "private": true,
-  "version": "0.5.25",
+  "version": "0.6.0",
   "scripts": {
     "test:ui": "playwright test",
-    "check": "node --check static/drafts.js && node --check static/owner-session.js && node --check static/work-registry.js && node --check static/appearance.js && node --check static/pipeline.js && node --check static/data-sources.js && node --check static/providers.js && node --check static/app.js && node --check static/i18n.js && node --check static/workspace.js && node --check static/integrations.js && node --check static/dashboard.js && node --check static/shared-tasks.js"
+    "check": "node --check static/drafts.js && node --check static/owner-session.js && node --check static/work-registry.js && node --check static/appearance.js && node --check static/pipeline.js && node --check static/data-sources.js && node --check static/providers.js && node --check static/app.js && node --check static/i18n.js && node --check static/workspace.js && node --check static/integrations.js && node --check static/dashboard.js && node --check static/shared-tasks.js && node --check static/task-workspace.js && node --check static/standards.js && node --check static/hardware.js && node --check static/storage-map.js"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"
