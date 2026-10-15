@@ -14,6 +14,7 @@ from rule_store import (
     _assert_outside_repositories, _atomic_json,
 )
 from storage_config import external_directory
+from storage_lock import write_lock
 
 
 class StandardsValidationError(RuleStoreError, ValueError):
@@ -229,7 +230,7 @@ class StandardsStore:
             return {"schemaVersion": 1, "repoId": repo_id, "standardRefs": copy.deepcopy(value["assignments"].get(repo_id, [])), "revision": _hash(value), "runtimeEnforced": False}
 
     def apply(self, repo_id: str, standard_id: str, version: str, revision: str) -> dict[str, Any]:
-        with self._lock:
+        with self._lock, write_lock(self.path):
             self._repo(repo_id)
             reference = _reference({"id": standard_id, "version": version})
             self.detail(standard_id, version)

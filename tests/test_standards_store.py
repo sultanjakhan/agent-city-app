@@ -125,6 +125,51 @@ class StandardsTests(unittest.TestCase):
         self.assertCountEqual(results, ["saved", "conflict"])
         self.assertEqual(len(self.store.assignments(self.repo_id)["standardRefs"]), 1)
 
+    def test_separate_instances_cannot_both_save_the_same_revision(self):
+        second = StandardsStore(self.data, self.inventory)
+        revision = self.store.assignments(self.repo_id)['revision']
+        read, release, second_done = threading.Event(), threading.Event(), threading.Event()
+        original_read = self.store._assignments
+        outcomes = []
+
+        def paused_read():
+            value = original_read()
+            read.set()
+            if not release.wait(3):
+                raise AssertionError('assignment read was not released')
+            return value
+
+        def assign(store, standard_id):
+            try:
+                store.apply(self.repo_id, standard_id, '0.1.0', revision)
+                outcomes.append('saved')
+            except StandardsRevisionConflict:
+                outcomes.append('conflict')
+            except Exception as error:
+                outcomes.append(error)
+            finally:
+                if store is second:
+                    second_done.set()
+
+        self.store._assignments = paused_read
+        first_worker = threading.Thread(target=assign, args=(self.store, 'qa-evidence'))
+        second_worker = threading.Thread(target=assign, args=(second, 'frontend-states'))
+        first_worker.start()
+        try:
+            self.assertTrue(read.wait(3))
+            second_worker.start()
+            second_done.wait(.1)
+        finally:
+            release.set()
+            first_worker.join(3)
+            if second_worker.ident is not None:
+                second_worker.join(3)
+        self.assertFalse(first_worker.is_alive())
+        self.assertFalse(second_worker.is_alive())
+        self.assertCountEqual(outcomes, ['saved', 'conflict'])
+        self.assertEqual(second.assignments(self.repo_id)['standardRefs'],
+                         [{'id': 'qa-evidence', 'version': '0.1.0'}])
+
     def test_catalog_tampering_and_unsafe_storage_are_rejected(self):
         self.store.apply(self.repo_id, "qa-evidence", "0.1.0", self.store.assignments(self.repo_id)["revision"])
         raw = json.loads(self.store.catalog_path.read_text(encoding="utf-8"))

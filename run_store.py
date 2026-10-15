@@ -8,6 +8,8 @@ import re
 import tempfile
 import threading
 
+from storage_lock import write_lock
+
 
 class RunError(ValueError):
     pass
@@ -151,7 +153,7 @@ class RunStore:
     def report(self, payload):
         row = validate(payload)
         digest = hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
-        with self.lock:
+        with self.lock, write_lock(self.path):
             data = self._read()
             old = data['runs'].get(row['runId'])
             self._advance(row, old, len(data['runs']))

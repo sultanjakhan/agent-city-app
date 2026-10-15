@@ -72,6 +72,7 @@ async function fetchRuleScope(scope){
 function applyRuleScope(bundle,preserveDraft=false){
  const draft=$('rules-content').value;ruleCurrent=bundle.current;ruleContext=bundle;rulePreview=null;
  $('rules-scope').value=ruleCurrent.scope;$('rules-content').value=preserveDraft?draft:ruleCurrent.content;
+ if(!preserveDraft)window.agentCityDrafts?.reset($('rules-content'));
  $('rules-diff-section').hidden=true;renderRuleSources();
 }
 async function loadRules(scope,updateScopes=false){
@@ -135,7 +136,7 @@ $('save-rules').addEventListener('click',async()=>{
  try{ruleCurrent=await request('/api/rules/save',{scope:ruleCurrent.scope,content:rulePreview,revision:ruleCurrent.revision});ruleContext.current=ruleCurrent;if(ruleCurrent.scope==='global')ruleContext.global=ruleCurrent;rulePreview=null;$('rules-diff-section').hidden=true;renderRuleSources();$('rules-message').textContent=t('Дополнения сохранены в Agent City. Они появятся при следующем запросе контекста.');}
  catch(e){await ruleFailure(e);}finally{setRuleBusy(false);}
 });
-$('discard-rules').addEventListener('click',()=>{if(!ruleCurrent||ruleSaving)return;$('rules-content').value=ruleCurrent.content;rulePreview=null;$('rules-diff-section').hidden=true;$('rules-message').textContent='';setRuleBusy(false);});
+$('discard-rules').addEventListener('click',()=>{if(!ruleCurrent||ruleSaving)return;$('rules-content').value=ruleCurrent.content;window.agentCityDrafts?.reset($('rules-content'));rulePreview=null;$('rules-diff-section').hidden=true;$('rules-message').textContent='';setRuleBusy(false);});
 $('rules-open-agents').addEventListener('click',()=>{selectSettingsTab('agents');setView('settings');});
 $('connect-rules').addEventListener('click',async()=>{
  if(!bridgeState||bridgeLoading)return;$('connect-rules').disabled=true;

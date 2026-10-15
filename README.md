@@ -70,8 +70,9 @@ For opt-in API/MCP access to both installed applications, see
 before writing, preserves existing client configuration and accepts each user's
 private paths. Automatic lifecycle hooks are a separate explicit option.
 
-Run `python -m unittest discover -s tests`, `npm run check` and, after installing
-the development dependencies, `npm run test:ui`. The separation acceptance check
+Install development dependencies with `npm ci`. Run `python -m unittest discover -s tests`,
+`npm run check` and `npm run test:unit`; `npm run test:ui` additionally needs a
+Playwright browser installation. The separation acceptance check
 is `python tools/verify_separation.py`; it uses temporary synthetic data and an
 ephemeral local HTTP port, without starting provider refreshes.
 

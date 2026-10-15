@@ -13,9 +13,10 @@ function workspace(dashboard,sync){
  const shared=fs.readFileSync(path.join(root,'static/shared-tasks.js'),'utf8');
  vm.runInContext(shared.slice(0,shared.indexOf('async function loadSharedTasks(')),context);
  context.dashboardFixture=dashboard;context.syncFixture=sync;
- vm.runInContext('dashboardData=dashboardFixture;sharedState=syncFixture;function freshRun(run){return ["running","waiting"].includes(run.status)&&Date.parse(run.updatedAt)<=Date.now()+30000&&age(run.updatedAt)<=300;}',context);
+ vm.runInContext('dashboardData=dashboardFixture;sharedState=syncFixture;',context);
+ vm.runInContext(dashboardCode.slice(dashboardCode.indexOf('function freshRun('),dashboardCode.indexOf('function stageName(')),context);
  vm.runInContext(fs.readFileSync(path.join(root,'static/task-workspace.js'),'utf8'),context);
- return {records:()=>JSON.parse(JSON.stringify(context.window.AgentCityTasks.records())),aggregate:runs=>{context.fixtureRuns=runs;return JSON.parse(vm.runInContext('JSON.stringify(aggregateRuns(fixtureRuns))',context));}};
+ return {records:()=>JSON.parse(JSON.stringify(context.window.AgentCityTasks.records())),aggregate:runs=>{context.fixtureRuns=runs;return JSON.parse(vm.runInContext('JSON.stringify(aggregateRuns(fixtureRuns))',context));},group:runs=>{context.fixtureRuns=runs;return JSON.parse(vm.runInContext('JSON.stringify(groupState(fixtureRuns))',context));},runState:run=>{context.fixtureRun=run;return vm.runInContext('runState(fixtureRun)',context);}};
 }
 function data(tasks=[],runs=[]){return {cicada:{source:{id:'source-1',sourceNamespace:ns},tasks:[],availableTasks:tasks,historyTasks:[]},runs,workRegistry:{publishers:{},bindings:{}}};}
 function sync(tasks={}){return {config:{staleAfterSeconds:300},tasks};}
@@ -33,6 +34,19 @@ test('stale running is never current; awaiting review and active human timer rem
  const stale=shared('stale'),review=shared('review'),timer=shared('timer');
  stale.reports=[{runId:'stale-run',status:'running',receivedAt:new Date(Date.now()-600000).toISOString()}];review.review={state:'awaiting_review',resultVersion:1};timer.humanTimerActive=true;
  const records=workspace(data(),sync({stale,review,timer})).records();assert.equal(records.find(r=>r.sourceId==='stale').current,false);assert.equal(records.find(r=>r.sourceId==='review').current,true);assert.equal(records.find(r=>r.sourceId==='timer').current,true);
+});
+
+test('shared report receipt freshness also controls stage and attempt status when executor clock differs',()=>{
+ const task=shared('clock-skew');
+ task.reports=[{runId:'clock-skew-run',status:'running',receivedAt:fresh,report:{stage:'Check',updatedAt:new Date(Date.now()-600000).toISOString()}}];
+ const api=workspace(data(),sync({'clock-skew':task})),record=api.records()[0];
+ assert.equal(record.running,true);assert.equal(record.current,true);
+ assert.equal(api.group(record.runs).label,'Работает');
+ assert.equal(api.runState(record.runs[0]),'Работает');
+ task.reports[0].receivedAt=new Date(Date.now()-600000).toISOString();task.reports[0].report.updatedAt=fresh;
+ const stale=api.records()[0];assert.equal(stale.current,false);
+ assert.equal(api.group(stale.runs).label,'Нет свежего отчёта');
+ assert.match(api.runState(stale.runs[0]),/Нет свежего отчёта/);
 });
 
 test('concurrent attempts with equal timestamps keep a task current while any real run is running',()=>{

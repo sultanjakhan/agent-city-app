@@ -7,8 +7,10 @@ from pathlib import Path
 import subprocess
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+import task_sync
 from task_connection import TaskConnection,TaskError,default_config,validate_config,strict,encode
 from task_sync import TaskSync
 from tools.task_gateway import Gateway,server_for
@@ -21,6 +23,16 @@ def report(run,status,sequence):
     return dict(runId=run,sequence=sequence,taskKey=None,agent='codex',provider=None,model=None,stage=None,status=status,skillIds=[],mcpCalls=None,inputTokens=None,outputTokens=None)
 
 class ConfigTests(unittest.TestCase):
+    def test_windows_lock_does_not_append_a_byte_on_every_snapshot(self):
+        fake_msvcrt = SimpleNamespace(LK_NBLCK=1, LK_UNLCK=2, locking=lambda *_: None)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'task-sync.lock'
+            with patch.object(task_sync, 'os', SimpleNamespace(name='nt')), patch.dict('sys.modules', msvcrt=fake_msvcrt):
+                for _ in range(20):
+                    with task_sync.locked(path):
+                        pass
+            self.assertEqual(path.stat().st_size, 0)
+
     def test_pipe_transport_failure_is_never_treated_as_a_task_receipt(self):
         class Failure(RuntimeError):value={'ok':False,'error':'application_unavailable_or_outcome_unknown'}
         class Offline:
@@ -45,6 +57,38 @@ class ConfigTests(unittest.TestCase):
         message={'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'shared_task_command','arguments':{'operationId':'test-op-001','command':'snapshot','arguments':{}}}}
         output=io.BytesIO();serve(Unavailable(),io.BytesIO(encode(message)+b'\n'),output)
         self.assertNotIn(b'PRIVATE_CREDENTIAL',output.getvalue());self.assertTrue(json.loads(output.getvalue())['result']['isError'])
+
+class SnapshotValidationTests(unittest.TestCase):
+    def test_empty_snapshot_namespace_is_validated_before_persisting_config(self):
+        good_namespace = '11111111-1111-4111-8111-111111111111'
+        for malformed in (None, 'invalid', [], {}):
+            with self.subTest(namespace=malformed), tempfile.TemporaryDirectory() as directory:
+                response = {'schemaVersion': 1, 'complete': True, 'sourceNamespace': malformed,
+                            'tasks': [], 'tombstones': []}
+
+                class Remote:
+                    def __init__(self, config):
+                        self.config = copy.deepcopy(config)
+
+                    def call(self, *args):
+                        return copy.deepcopy(response)
+
+                root = Path(directory)
+                sync = TaskSync(root / 'city', Remote)
+                sync.stop.set()
+                sync.configure(configuration(root), 0)
+                state = sync.exchange()
+                self.assertEqual(state['failure']['code'], 'invalid_task_namespace')
+                self.assertIsNone(state['config']['sourceNamespace'])
+                self.assertIsNone(state['lastSuccess'])
+                self.assertEqual(TaskSync(root / 'city').snapshot()['config'], state['config'])
+                # A bad response must leave the profile able to recover using
+                # a subsequent valid response, without editing its JSON file.
+                response['sourceNamespace'] = good_namespace
+                recovered = sync.exchange()
+                self.assertIsNone(recovered['failure'])
+                self.assertEqual(recovered['config']['sourceNamespace'], good_namespace)
+                self.assertIsNotNone(recovered['lastSuccess'])
 
 class NativeBridge:
     def __init__(self,exe,db):

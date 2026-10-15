@@ -150,6 +150,54 @@ class RunStoreTests(unittest.TestCase):
         self.assertTrue(all(outcome in {"saved", "conflict"} for outcome in outcomes))
         self.assertIn("saved", outcomes)
 
+    def test_two_store_instances_cannot_replace_a_newer_accepted_report(self):
+        self.store.report(report())
+        second = RunStore(self.temp.name)
+        read, release, second_done = threading.Event(), threading.Event(), threading.Event()
+        original_read = self.store._read
+        outcomes = []
+
+        def paused_read():
+            value = original_read()
+            read.set()
+            if not release.wait(3):
+                raise AssertionError('report read was not released')
+            return value
+
+        def publish(store, sequence):
+            try:
+                store.report(report(sequence=sequence, stage=f'stage-{sequence}'))
+                outcomes.append('saved')
+            except RunConflict:
+                outcomes.append('conflict')
+            except Exception as error:
+                outcomes.append(error)
+            finally:
+                if store is second:
+                    second_done.set()
+
+        self.store._read = paused_read
+        first_worker = threading.Thread(target=publish, args=(self.store, 2))
+        second_worker = threading.Thread(target=publish, args=(second, 3))
+        first_worker.start()
+        try:
+            self.assertTrue(read.wait(3))
+            second_worker.start()
+            # Without the shared transaction lock, sequence 3 is accepted here
+            # and then silently replaced by the first writer's sequence 2.
+            second_done.wait(.1)
+        finally:
+            release.set()
+            first_worker.join(3)
+            if second_worker.ident is not None:
+                second_worker.join(3)
+        self.assertFalse(first_worker.is_alive())
+        self.assertFalse(second_worker.is_alive())
+        self.assertCountEqual(outcomes, ['saved', 'saved'])
+        self.assertEqual(second.snapshot()[0]['sequence'], 3)
+        self.assertEqual([item['stage'] for item in second.snapshot()[0]['history']],
+                         ['planning', 'stage-2', 'stage-3'])
+
 
 class PersistedWrongTypeTests(unittest.TestCase):
     def test_full_35_case_matrix_fails_closed_and_preserves_file(self):

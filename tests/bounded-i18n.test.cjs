@@ -2,7 +2,8 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {JSDOM}=require('jsdom');
 const base=path.resolve(__dirname,'..');
 const read=file=>fs.readFileSync(path.join(base,file),'utf8').replace(/\r\n/g,'\n');
-const baseSource=file=>require('node:child_process').execFileSync('git',['-c','safe.directory=*','-c','core.fsmonitor=false','show','0792833c56d6c997b1e5b69074719ca4d835a38a:'+file],{cwd:base,encoding:'utf8'});
+// Preserve the public 0.5.24 authority contract without private Git history.
+const ownerContract=JSON.parse(read('tests/fixtures/owner-session-contract.json'));
 const copy=JSON.parse(read('tests/bounded-copy.json'));
 function dom(language){
  const d=new JSDOM(read('static/index.html'),{url:'http://synthetic.invalid/',runScripts:'outside-only'});
@@ -11,11 +12,11 @@ function dom(language){
  return d;
 }
 (async()=>{
- const originalOwner=baseSource('static/owner-session.js'),currentOwner=read('static/owner-session.js');
+ const currentOwner=read('static/owner-session.js');
  // Copy changes must preserve the authorization and retry implementations exactly.
  const connect=source=>source.slice(source.indexOf(' async function connect()'));
  const retry=source=>source.match(/retry\.onclick=async\(\)=>\{.*?\};/)[0];
- assert.equal(connect(currentOwner),connect(originalOwner));assert.equal(retry(currentOwner),retry(originalOwner));
+ assert.equal(connect(currentOwner),ownerContract.connect);assert.equal(retry(currentOwner),ownerContract.retry);
 
  const d=dom('en'),w=d.window,$=id=>w.document.getElementById(id);w.qaI18n.init();
  assert.equal($('save-repo-profile').textContent,'Save profile');

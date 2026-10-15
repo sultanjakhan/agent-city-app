@@ -121,7 +121,7 @@ async function loadDashboard(force=false){
 function scheduleDashboard(){if(dashboardTimer)return;if(['dashboard','tasks'].includes(view))dashboardTimer=setTimeout(()=>{dashboardTimer=null;if(['dashboard','tasks'].includes(view))loadDashboard(true);},5000);}
 function renderDashboard(){loadDashboard();}
 function taskRuns(task){return task._runs||(dashboardData?.runs||[]).filter(r=>(task.runTaskKeys||[task.taskKey]).includes(r.taskKey));}
-function freshRun(run){return ['running','waiting'].includes(run.status)&&Date.parse(run.updatedAt)<=Date.now()+30000&&age(run.updatedAt)<=300;}
+function freshRun(run){return ['running','waiting'].includes(run.status)&&(run._sharedReport?sharedRunFresh(run):Date.parse(run.updatedAt)<=Date.now()+30000&&age(run.updatedAt)<=300);}
 function mcpText(run){return run.mcpCalls===null||run.mcpCalls===undefined?t('Нет данных'):run.mcpCalls.length?run.mcpCalls.map(c=>`${c.server} / ${c.tool} × ${c.calls}`).join(', '):t('Вызовов не было');}
 function runState(run){return t(runStatuses[run.status]||'Нет данных')+(['running','waiting'].includes(run.status)&&!freshRun(run)?' · '+t('Нет свежего отчёта'):'');}
 function stageName(task){return task.stageLabel||task.stage||t('Этап не задан');}

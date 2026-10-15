@@ -159,17 +159,31 @@ internal sealed class CityWindow : Form
     private string statusKey = nameof(DesktopText.Starting);
     private readonly BackendHealth backendHealth = new();
     private readonly System.Windows.Forms.Timer health = new() { Interval = 1000 };
+    private readonly System.Windows.Forms.Timer placementSave = new() { Interval = 500 };
+    private readonly WindowPlacementStore? placementStore;
+    private WindowPlacement? windowPlacement;
     private readonly bool backgroundStart;
     protected override bool ShowWithoutActivation => backgroundStart;
-    public CityWindow(string config, bool localOnly, bool backgroundStart = false)
+    public CityWindow(string config, bool localOnly, bool backgroundStart = false, string? windowStateScope = null)
     {
         this.config = config; this.localOnly = localOnly;
         this.backgroundStart = backgroundStart;
-        if (backgroundStart) WindowState = FormWindowState.Minimized;
         Text = "Agent City";
         using (var iconStream = typeof(CityWindow).Assembly.GetManifestResourceStream("AgentCity.Icon")!)
             Icon = new Icon(iconStream);
         Width = 1220; Height = 900; MinimumSize = new Size(760, 520);
+        placementStore = WindowPlacementStore.ForScope(windowStateScope);
+        var savedPlacement = placementStore?.Load();
+        if (savedPlacement != null)
+        {
+            var areas = Screen.AllScreens.OrderByDescending(screen => screen.Primary).Select(screen => screen.WorkingArea).ToArray();
+            windowPlacement = savedPlacement.Fit(areas);
+            StartPosition = FormStartPosition.Manual;
+            MinimumSize = new Size(Math.Min(760, windowPlacement.Width), Math.Min(520, windowPlacement.Height));
+            Bounds = windowPlacement.Bounds;
+            if (windowPlacement.Maximized) WindowState = FormWindowState.Maximized;
+        }
+        if (backgroundStart) WindowState = FormWindowState.Minimized;
         Controls.Add(view); Controls.Add(status);
         checkUpdates.Click += async (_, _) => await CheckForUpdates();
         SetStatus(nameof(DesktopText.Starting));
@@ -190,14 +204,36 @@ internal sealed class CityWindow : Form
         };
         Shown += async (_, _) =>
         {
+            QueueWindowPlacement();
             await Action(Initialize);
             StartUpdates();
         };
         FormClosing += OnClosing;
+        LocationChanged += (_, _) => QueueWindowPlacement();
+        SizeChanged += (_, _) => QueueWindowPlacement();
+        placementSave.Tick += (_, _) => SaveWindowPlacement();
+        FormClosed += (_, _) => SaveWindowPlacement();
         health.Tick += async (_, _) => await ObserveBackend();
         // UI-only refresh: never issue locale reads through backend health/auth.
         localeRefresh.Tick += async (_, _) => { if (!busy && (localeReadTask == null || localeReadTask.IsCompleted)) await RefreshNativeLocale(); };
-        Disposed += (_, _) => localeRefresh.Dispose();
+        Disposed += (_, _) => { localeRefresh.Dispose(); placementSave.Dispose(); };
+    }
+    private void QueueWindowPlacement()
+    {
+        // Minimize coordinates (including background startup) are never restored.
+        // Keep the last normal/maximized state so focusing a minimized window
+        // returns it to the state it had before it was minimized.
+        if (!IsHandleCreated || IsDisposed || WindowState == FormWindowState.Minimized) return;
+        var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+        var placement = new WindowPlacement(bounds.X, bounds.Y, bounds.Width, bounds.Height, WindowState == FormWindowState.Maximized);
+        if (!placement.Valid) return;
+        windowPlacement = placement;
+        placementSave.Stop(); placementSave.Start();
+    }
+    private void SaveWindowPlacement()
+    {
+        placementSave.Stop();
+        if (windowPlacement != null) placementStore?.Save(windowPlacement);
     }
     private bool IsCurrentLocaleDocument(long epoch)
     {
@@ -349,8 +385,9 @@ internal sealed class CityWindow : Form
     public void FocusOwnedWindow()
     {
         if (!Visible) Show();
+        if (WindowState == FormWindowState.Minimized)
+            WindowState = windowPlacement?.Maximized == true ? FormWindowState.Maximized : FormWindowState.Normal;
         NativeWindowMenu.Reveal(Handle);
-        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Activate(); BringToFront();
     }
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
@@ -672,7 +709,7 @@ internal static class Program
         {
             using var focus = new EventWaitHandle(false, EventResetMode.AutoReset, InstancePolicy.FocusName(scope, configScope, localOnly));
             ApplicationConfiguration.Initialize();
-            using var form = new CityWindow(config, localOnly, background);
+            using var form = new CityWindow(config, localOnly, background, scope);
             var watcher = ThreadPool.RegisterWaitForSingleObject(focus, (_, _) =>
             {
                 if (form.IsHandleCreated && !form.IsDisposed) try { form.BeginInvoke(form.FocusOwnedWindow); } catch { }
