@@ -101,6 +101,9 @@ CHINESE_DEVELOPERS = {"qwen", "deepseek", "z-ai", "zai", "thudm", "moonshotai",
                       "baidu", "tencent", "bytedance", "bytedance-seed", "xiaomi",
                       "meituan", "alibaba", "alibaba-cloud", "01-ai", "internlm", "dots-studio"}
 MAX_JSON = 4 * 1024 * 1024
+# state.json combines several independently bounded provider catalogues.
+# Its read and write limit must match, including for pre-existing profiles.
+MAX_STATE_BYTES = 64 * 1024 * 1024
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -399,21 +402,31 @@ class Store:
         self.state = {"schemaVersion": 1, "favorites": [], "catalogs": {}, "codexbar": {}, "checks": {}, "directory": {}}
         self.clients = access.clients()
         try:
-            raw = self.path.read_bytes()
-            saved = json.loads(raw) if len(raw) <= MAX_JSON else None
-            if isinstance(saved, dict) and saved.get("schemaVersion") == 1:
-                if isinstance(saved.get("favorites"), list):
-                    self.state["favorites"] = [x for x in saved["favorites"][:2000] if isinstance(x, str) and len(x) <= 200]
-                if isinstance(saved.get("catalogs"), dict):
-                    self.state["catalogs"] = {k: v for k, v in saved["catalogs"].items() if k in PROVIDERS and isinstance(v, dict) and isinstance(v.get("models"), list)}
-                if isinstance(saved.get("codexbar"), dict):
-                    self.state["codexbar"] = saved["codexbar"]
-                if isinstance(saved.get("checks"), dict):
-                    self.state["checks"] = saved["checks"]
-                if isinstance(saved.get('directory'), dict):
-                    self.state['directory'] = saved['directory']
-        except (OSError, ValueError):
-            pass
+            with self.path.open("rb") as stream:
+                raw = stream.read(MAX_STATE_BYTES + 1)
+        except FileNotFoundError:
+            raw = None
+        if raw is not None:
+            if len(raw) > MAX_STATE_BYTES:
+                raise OSError("Saved application state exceeds the 64 MiB limit; the existing file was preserved.")
+            try:
+                saved = json.loads(raw)
+                if not isinstance(saved, dict) or type(saved.get("schemaVersion")) is not int or saved["schemaVersion"] != 1:
+                    raise ValueError()
+                for field, expected in (("favorites", list), ("catalogs", dict), ("codexbar", dict), ("checks", dict), ("directory", dict)):
+                    if field in saved and not isinstance(saved[field], expected):
+                        raise ValueError()
+                favorites = saved.get("favorites", [])
+                if any(not isinstance(item, str) or len(item) > 200 for item in favorites):
+                    raise ValueError()
+            except (ValueError, UnicodeError, RecursionError):
+                # Starting with empty preferences would let the next successful
+                # write destroy the unreadable profile. Require recovery first.
+                raise OSError("Could not read saved application state; the existing file was preserved.") from None
+            self.state["favorites"] = favorites
+            self.state["catalogs"] = {k: v for k, v in saved.get("catalogs", {}).items() if k in PROVIDERS and isinstance(v, dict) and isinstance(v.get("models"), list)}
+            for field in ("codexbar", "checks", "directory"):
+                self.state[field] = saved.get(field, {})
         # Old versions seeded curated offers without a successful API response.
         # Keep favorites/checks, but never treat that list as a discovered catalogue.
         for catalog in self.state["catalogs"].values():
@@ -423,10 +436,22 @@ class Store:
                 catalog.pop("updatedAt", None)
 
     def save(self):
-        temporary = self.path.with_suffix(".tmp")
-        with temporary.open("w", encoding="utf-8") as stream:
-            json.dump(self.state, stream, ensure_ascii=False, allow_nan=False)
-        os.replace(temporary, self.path)
+        fd, temporary = tempfile.mkstemp(prefix=".state-", suffix=".tmp", dir=self.directory)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                size = 0
+                for part in json.JSONEncoder(ensure_ascii=False, allow_nan=False).iterencode(self.state):
+                    raw = part.encode("utf-8")
+                    size += len(raw)
+                    if size > MAX_STATE_BYTES:
+                        raise OSError("Application state exceeds the 64 MiB limit; the existing file was preserved.")
+                    stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     def cloud_reports(self):
         rows = [{key: value for key, value in row.items() if key in PUBLIC_FIELDS} for row in self.runs.snapshot()]
@@ -483,22 +508,26 @@ class Store:
         return {'schemaVersion': 1, 'asOf': now(), 'cicada': source, 'runs': runs, 'workRegistry': registry,
                 'telemetry': 'reported', 'notice': 'Tasks are read from Cicada. Model, token and skill fields require an explicit agent report. Missing data is not zero.'}
 
+    def _effective_catalogs(self, active_sources=None):
+        active_sources = self.providers.sources() if active_sources is None else active_sources
+        catalogs = copy.deepcopy({key: catalog for key, catalog in self.state['catalogs'].items() if key in active_sources})
+        # Legacy Cline membership in `free` is not numeric price evidence.
+        for model in catalogs.get('cline', {}).get('models', []):
+            model['priceVerified'] = False
+        seeds = json.loads((ROOT / 'published_catalog_seed.json').read_text(encoding='utf8'))
+        for ident, seed in seeds.items():
+            if ident not in active_sources:
+                continue
+            current = catalogs.get(ident, {})
+            if not current.get('models'):
+                catalogs[ident] = {**copy.deepcopy(seed), **{key:current[key] for key in ('error','attemptedAt') if key in current}, 'updatedAt':seed['observedAt'], 'authStatus':'unverified'}
+        return catalogs
+
     def snapshot(self):
         with self.lock:
-            value = copy.deepcopy(self.state)
+            value = copy.deepcopy({key: value for key, value in self.state.items() if key != 'catalogs'})
             active_sources = self.providers.sources()
-            value['catalogs'] = {key: catalog for key, catalog in value['catalogs'].items() if key in active_sources}
-            # Legacy Cline snapshots treated membership in `free` as zero-price
-            # evidence. That group does not supply numeric pricing; keep the
-            # user's cache on disk but do not expose it as confirmed free.
-            for model in value['catalogs'].get('cline', {}).get('models', []):
-                model['priceVerified'] = False
-            seeds = json.loads((ROOT / 'published_catalog_seed.json').read_text(encoding='utf8'))
-            for ident, seed in seeds.items():
-                if ident not in active_sources:continue
-                current = value['catalogs'].get(ident, {})
-                if not current.get('models'):
-                    value['catalogs'][ident] = {**copy.deepcopy(seed), **{key:current[key] for key in ('error','attemptedAt') if key in current}, 'updatedAt':seed['observedAt'], 'authStatus':'unverified'}
+            value['catalogs'] = self._effective_catalogs(active_sources)
             for record in value["checks"].values():
                 if not self.local_only and record.get("credentialRevision") and record["credentialRevision"] != credentials.revision(record.get("provider")):
                     record.update(status="key_changed", reply="", sent=False, detail="Ключ изменён; нужна новая проверка")
@@ -641,7 +670,7 @@ class Store:
 
     def favorite(self, model_id, enabled):
         with self.lock:
-            known = {x.get("id") for c in self.state["catalogs"].values() for x in c.get('allModels',c.get('models',[])) if isinstance(x, dict)}
+            known = {x.get("id") for c in self._effective_catalogs().values() for x in c.get('allModels',c.get('models',[])) if isinstance(x, dict)}
             saved = set(self.state["favorites"])
             if model_id not in known and model_id not in saved:
                 raise ValueError("unknown model")
