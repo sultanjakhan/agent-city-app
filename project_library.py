@@ -17,6 +17,8 @@ import threading
 from typing import Any
 from urllib.parse import urlsplit
 
+from storage_lock import write_lock
+
 
 class ProjectLibraryError(Exception):
     """Base class for project-library errors."""
@@ -192,7 +194,7 @@ class ProjectLibrary:
 
     def save(self, record: dict[str, Any], revision: str | None) -> dict[str, Any]:
         validated = validate_record(record)
-        with self._lock:
+        with self._lock, write_lock(self.path):
             payload, current_revision = self._read()
             if revision != current_revision:
                 raise ProjectRevisionConflict("project library revision changed")

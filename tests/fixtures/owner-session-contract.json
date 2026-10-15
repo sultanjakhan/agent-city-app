@@ -1,0 +1,4 @@
+{
+  "connect": " async function connect(){try{\n   if(capability){const value=capability;capability=null;const response=await fetch('/api/owner-bootstrap',{method:'POST',headers:{'Content-Type':'application/json','X-Agent-City':'1'},body:JSON.stringify({capability:value})});if(!response.ok)throw Error();}\n   const response=await fetch('/api/owner-session');if(!response.ok)throw Error();\n   if(blocked){blocked.close();blocked.remove();blocked=null;}return true;\n }catch{lock();return false;}}\n window.agentCityOwnerDenied=lock;window.agentCityOwnerReady=connect();\n})();\n",
+  "retry": "retry.onclick=async()=>{retry.disabled=true;window.agentCityOwnerReady=connect();if(await window.agentCityOwnerReady){if(typeof load==='function')load();}else retry.disabled=false;};"
+}

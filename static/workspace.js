@@ -100,6 +100,7 @@ async function renderSkills(){
 }
 function installSkillDraft(skill){
  skillCurrent=skill;skillPreview=null;$('skill-title').textContent=skill.name;$('skill-path').textContent=skill.path;$('skill-content').value=skill.content;
+ window.agentCityDrafts?.reset($('skill-content'));
  const readonly=skill.editable===false;$('skill-content').readOnly=readonly;document.querySelector('#skill-dialog .skill-actions').hidden=readonly;$('skill-history-section').hidden=readonly;
  $('skill-diff-section').hidden=true;$('save-skill').disabled=true;$('skill-message').textContent='';
  $('skill-history').replaceChildren(...(skill.history||[]).map(h=>new Option(`${when(h.modifiedAt)} · ${h.revision.slice(0,8)}`,h.revision)));
@@ -167,6 +168,7 @@ function openProject(project=null){
  if(projectSaving||!projectsSnapshot)return;
  projectCurrent=project;$('project-form').reset();$('project-error').textContent='';$('project-title').textContent=t(project?'Изменить расширение':'Добавить расширение');
  if(project){for(const [id,value] of Object.entries({'project-name':project.name,'project-repo':project.repoUrl,'project-docs':project.docsUrl,'project-ru':project.description.ru,'project-en':project.description.en,'project-cases-ru':project.useCases.map(c=>c.ru).join('\n'),'project-cases-en':project.useCases.map(c=>c.en).join('\n'),'project-category':project.category}))$(id).value=value;}
+ for(const field of $('project-form').querySelectorAll('input,textarea,select'))window.agentCityDrafts?.reset(field);
  projectInitial=projectDraft();$('project-dialog').showModal();
 }
 $('projects-search').addEventListener('input',renderProjects);

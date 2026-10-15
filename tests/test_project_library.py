@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -80,6 +81,50 @@ class ProjectLibraryTests(unittest.TestCase):
         self.path.write_text("[]", encoding="utf-8")
         with self.assertRaises(ProjectValidationError):
             self.library.list()
+
+    def test_two_library_instances_check_revision_inside_the_same_transaction(self):
+        second = ProjectLibrary(self.path)
+        revision = self.library.revision()
+        read, release, second_done = threading.Event(), threading.Event(), threading.Event()
+        original_read = self.library._read
+        outcomes = []
+
+        def paused_read():
+            value = original_read()
+            read.set()
+            if not release.wait(3):
+                raise AssertionError('library read was not released')
+            return value
+
+        def save(library, ident):
+            try:
+                library.save(project(id=ident), revision)
+                outcomes.append('saved')
+            except ProjectRevisionConflict:
+                outcomes.append('conflict')
+            except Exception as error:
+                outcomes.append(error)
+            finally:
+                if library is second:
+                    second_done.set()
+
+        self.library._read = paused_read
+        first_worker = threading.Thread(target=save, args=(self.library, 'first'))
+        second_worker = threading.Thread(target=save, args=(second, 'second'))
+        first_worker.start()
+        try:
+            self.assertTrue(read.wait(3))
+            second_worker.start()
+            second_done.wait(.1)
+        finally:
+            release.set()
+            first_worker.join(3)
+            if second_worker.ident is not None:
+                second_worker.join(3)
+        self.assertFalse(first_worker.is_alive())
+        self.assertFalse(second_worker.is_alive())
+        self.assertCountEqual(outcomes, ['saved', 'conflict'])
+        self.assertEqual([item['id'] for item in second.list()], ['first'])
 
 
 if __name__ == "__main__":

@@ -23,7 +23,9 @@ def locked(path):
         with path.open('a+b') as stream:
             if os.name=='nt':
                 import msvcrt
-                stream.seek(0);stream.write(b'0');stream.flush();stream.seek(0)
+                # Byte-range locks can extend past EOF; writing in append
+                # mode before the lock grows this file on every UI poll.
+                stream.seek(0)
                 try:msvcrt.locking(stream.fileno(),msvcrt.LK_NBLCK,1)
                 except OSError:raise TaskError('task_sync_busy',409) from None
             else:
@@ -154,6 +156,11 @@ class TaskSync:
             snapshot=client.call('snapshot-'+uuid.uuid4().hex,'snapshot',{})
             ns=snapshot.get('sourceNamespace')
             if snapshot.get('schemaVersion')!=1 or snapshot.get('complete') is not True or type(snapshot.get('tasks'))!=list or type(snapshot.get('tombstones'))!=list:raise TaskError('incomplete_task_snapshot')
+            # Even an empty snapshot must identify a valid deployment before
+            # its namespace is persisted into the validated local config.
+            from work_exchange import namespace
+            try:namespace(ns)
+            except ValueError:raise TaskError('invalid_task_namespace') from None
             tasks={}
             for row in snapshot['tasks']:
                 task=validate_task(row,ns)

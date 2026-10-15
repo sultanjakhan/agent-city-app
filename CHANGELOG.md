@@ -2,6 +2,17 @@
 
 ## 0.6.0 — release candidate
 
+- Open shared tasks without failing while their editor is temporarily detached.
+  Refresh completion, timer, review and permission controls as task state changes,
+  while retaining unsaved fields. Use receipt time for shared report freshness.
+- Serialize report, extension and standards writes across store instances and
+  processes, preserving newer reports and revision conflicts.
+- Reject malformed namespaces in empty task snapshots before saving connection
+  state, so a later valid exchange can recover.
+- Reset draft baselines when loading saved skills, extension forms and rule scopes,
+  and when explicitly discarding rule edits.
+- Remember native window position, size and maximized state per profile; recover
+  visible bounds when a monitor is removed. Windows acceptance remains pending.
 - Use nine left navigation sections, with a drawer on narrow screens. Models
   opens subscription limits; Providers has its own section.
 - Keep Dashboard limited to current tasks. Open a task in the main workspace,

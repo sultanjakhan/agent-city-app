@@ -132,15 +132,17 @@
   if(!task){fields.append(button('Создать в Cicada',()=>sharedAction(async()=>{await queueShared('create',{title:title.value,content:content.value});if(!editorDirty())back();}),'create-shared-task',!can('tasks:write')));return;}
   const stage=field(fields,'Этап (ID)',task.stage||''),process=field(fields,'Процесс (ID)',task.process||'');
   const versioned=extra=>({taskId:task.id,expectedVersion:editorVersion,...extra});
-  fields.append(button('Сохранить изменения',()=>sharedAction(()=>queueShared('patch',versioned({patch:{title:title.value,content:content.value,stage:stage.value,process:process.value}}))),null,!can('tasks:write',task)));
-  if(!task.review)fields.append(button(task.completed?'Вернуть в текущие':'Завершить задачу',()=>sharedAction(()=>queueShared('patch',versioned({patch:{status:task.completed?'task':'done'}}))),null,!can('tasks:write',task)||task.humanTimerActive));
-  const comments=el('section','task-feedback');comments.id='task-feedback';editor.append(comments);const feedback=field(comments,'Комментарий / отзыв','',true);comments.append(button('Добавить комментарий',()=>sharedAction(()=>queueShared('comment',versioned({comment:feedback.value}))),null,!can('tasks:write',task)));
+  fields.append(button('Сохранить изменения',()=>sharedAction(()=>queueShared('patch',versioned({patch:{title:title.value,content:content.value,stage:stage.value,process:process.value}}))),'save-shared-task',!can('tasks:write',task)));
+  const completion=button(task.completed?'Вернуть в текущие':'Завершить задачу',()=>sharedAction(()=>queueShared('patch',versioned({patch:{status:find(screenKey)?.shared?.completed?'task':'done'}}))),'toggle-shared-task',!can('tasks:write',task)||task.humanTimerActive);completion.hidden=!!task.review;fields.append(completion);
+  const comments=el('section','task-feedback');comments.id='task-feedback';editor.append(comments);const feedback=field(comments,'Комментарий / отзыв','',true);comments.append(button('Добавить комментарий',()=>sharedAction(()=>queueShared('comment',versioned({comment:feedback.value}))),'comment-shared-task',!can('tasks:write',task)));
   const review=el('div','task-review-controls');review.id='task-review-controls';comments.append(review);
  }
  function refreshEditor(task){
   if(!editor||!task)return;
   if(!editorDirty()&&editorVersion!==task.version){for(const node of editor.querySelectorAll('[data-draft-field]')){const name=node.dataset.draftField;node.value=name==='comment'?'':task[name]||'';node.dataset.initialValue=node.value;window.agentCityDrafts?.reset(node);}editorVersion=task.version;}
-  const review=$('task-review-controls');review.replaceChildren();
+  editor.querySelector('#save-shared-task').disabled=editor.querySelector('#comment-shared-task').disabled=!can('tasks:write',task);
+  const completion=editor.querySelector('#toggle-shared-task'),label=task.completed?'Вернуть в текущие':'Завершить задачу';completion.dataset.taskLabel=label;completion.textContent=t(label);completion.hidden=!!task.review;completion.disabled=!can('tasks:write',task)||task.humanTimerActive;
+  const review=editor.querySelector('#task-review-controls');review.replaceChildren();
   if(task.review?.state==='awaiting_review')for(const [decision,label] of [['accept','Принять в историю'],['rework','Запросить доработку']])review.append(button(label,()=>sharedAction(()=>queueShared('review',{taskId:task.id,expectedVersion:editorVersion,resultVersion:task.review.resultVersion,decision,...(decision==='rework'?{comment:editor.querySelector('[data-draft-field="comment"]').value}:{})})),null,!can('tasks:review',task)||task.humanTimerActive));
  }
  function reportActions(record){
@@ -193,7 +195,7 @@
   reportActions(record);if(record?.shared)$('dashboard-task-actions').append(button('Редактировать',()=>{tab='context';renderScreen();},'edit-shared-task'));for(const key of ['overview','history','context']){const selected=tab===key;$('task-tab-'+key).setAttribute('aria-selected',String(selected));$('task-tab-'+key).tabIndex=selected?0:-1;$('task-panel-'+key).hidden=!selected;}
   // Keep form nodes alive across refreshes so host draft acknowledgements stay exact.
   if(editor)editor.remove();overview(record);historyPanel(record);contextPanel(record);
-  if(editor){const newTask=opened==='new';$('task-edit-fields').hidden=!newTask&&tab!=='context';if($('task-feedback'))$('task-feedback').hidden=tab!=='overview';editor.hidden=!newTask&&(tab==='history'||!record);$(newTask?'task-panel-overview':tab==='history'?'task-panel-overview':'task-panel-'+tab).append(editor);}
+  if(editor){const newTask=opened==='new';editor.querySelector('#task-edit-fields').hidden=!newTask&&tab!=='context';const feedback=editor.querySelector('#task-feedback');if(feedback)feedback.hidden=tab!=='overview';editor.hidden=!newTask&&(tab==='history'||!record);$(newTask?'task-panel-overview':tab==='history'?'task-panel-overview':'task-panel-'+tab).append(editor);}
   if(!record&&opened!=='new')$('task-panel-overview').append(el('p','notice','Задачи больше нет в выбранном источнике.'));
   if(focused&&$(focused))$(focused).focus({preventScroll:true});window.scrollTo(0,scroll);
  }
