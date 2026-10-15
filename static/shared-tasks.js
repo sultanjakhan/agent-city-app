@@ -3,6 +3,7 @@
 let sharedState=null,sharedLoading=false,sharedBusy=false,sharedReadFailed=false;
 const sharedText={task_connection_unavailable:'Приложение или канал недоступны. Проверь адрес и запусти фоновый канал.',task_authentication_missing:'В процессе приложения нет указанного секрета. Настрой переменную окружения и перезапусти фоновый сервис.',task_authentication_rejected:'Секрет не принят. Проверь учётные данные сервиса.',task_scope_denied:'Недостаточно прав для этой команды. Проверь области доступа и список ID.',task_namespace_changed:'Подключён другой источник. Верни прежний профиль или создай отдельный профиль данных.',task_source_change_requires_separate_profile:'Есть сохранённые задачи или черновики. Для другого источника используй отдельный профиль данных.',revision_conflict:'Задача изменена в другом приложении. Сравни версии и отправь новый черновик.',task_settings_conflict:'Настройки изменились. Обнови страницу и повтори.',human_timer_active:'Сначала останови свой таймер в Cicada.',review_controls_status:'Для результата используй принятие или доработку.',task_exchange_failed:'Обмен не завершён. Проверь настройки и повтори; черновики сохранены.'};
 Object.assign(sharedText,{task_version_conflict:'Задача изменена в другом приложении. Сравни версии и отправь новый черновик.',execution_run_mismatch:'Эту доработку подтвердил другой запуск. Его работа не изменена; твой черновик сохранён.',operation_capacity:'Журнал операций Cicada заполнен. Обнови Cicada и повтори сохранённую отправку.',invalid_shared_text:'Текст слишком длинный или содержит неподдерживаемые символы. Исправь текст; прежняя отправка сохранена.'});
+Object.assign(sharedText,{task_title_too_large:'Сократи название до 500 байт UTF-8. Введённый текст сохранён в форме.',task_text_too_large:'Сократи текст до 8000 байт UTF-8. Введённый текст сохранён в форме.'});
 function sharedError(code){return sharedText[code]||`Обмен не выполнен (${code||'нет данных'}). Проверь настройки подключения.`;}
 function isSharedTask(key,sourceId=null,sourceNamespace=null){return Object.values(sharedState?.tasks||{}).some(t=>t.binding.taskKey===key||sourceId&&sourceNamespace&&t.binding.sourceId===sourceId&&t.binding.sourceNamespace===sourceNamespace);}
 function sharedRun(task){return [...task.reports].sort((a,b)=>(Date.parse(b.receivedAt)||0)-(Date.parse(a.receivedAt)||0)||(b.receivedOrder||0)-(a.receivedOrder||0))[0]||null;}
@@ -67,6 +68,11 @@ function appendSharedTaskRows(){
  if(count)$('dashboard-empty').hidden=true;
 }
 async function queueShared(command,args){
+ // Match Cicada's UTF-8 byte limits before making a durable, immutable request.
+ const fields=args.patch||args;
+ for(const [name,limit,code] of [['title',500,'task_title_too_large'],['content',8000,'task_text_too_large'],['comment',8000,'task_text_too_large']]){
+  if(typeof fields[name]==='string'&&new TextEncoder().encode(fields[name]).length>limit)throw Error(code);
+ }
  const key='agent-city-shared-unsent-v1',drafts=JSON.parse(localStorage.getItem(key)||'{}');
  const ns=sharedState.config.sourceNamespace,signature=JSON.stringify({command,arguments:args,sourceNamespace:ns});
  const existing=Object.entries(drafts).find(([,v])=>JSON.stringify({command:v.command,arguments:v.arguments,sourceNamespace:v.sourceNamespace})===signature);

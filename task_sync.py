@@ -49,14 +49,37 @@ class TaskSync:
         self.stop=threading.Event();self.worker=None;self.exchange_lock=threading.Lock()
     def _read(self):
         _reject_redirects(self.path)
-        if not self.path.exists():return {'schemaVersion':1,'revision':0,'config':default_config(),'tasks':{},'outbox':{},'receipts':{},'lastSuccess':None,'lastAttempt':None,'failure':None}
+        if not self.path.exists():return {'schemaVersion':1,'revision':0,'config':default_config(),'tasks':{},'outbox':{},'receipts':{},'nextQueueOrder':1,'lastSuccess':None,'lastAttempt':None,'failure':None}
         raw=self.path.read_bytes()
         if len(raw)>MAX_STORE:raise TaskError('task_sync_capacity',409)
         # Stored content has a larger bounded limit than one wire response.
         try:value=json.loads(raw)
         except (ValueError,UnicodeError):raise TaskError('invalid_task_sync_storage') from None
         if type(value)!=dict or value.get('schemaVersion')!=1 or any(type(value.get(k))!=dict for k in ('tasks','outbox','receipts')):raise TaskError('invalid_task_sync_storage')
-        validate_config(value['config']);return value
+        validate_config(value['config'])
+        # Older documents have only queuedAt. Recover their chronological order
+        # once, preserving stored order for indistinguishable legacy timestamps.
+        # New entries use an ordinal: JSON key sorting and clock precision must
+        # never change the order of commands or unknown-outcome retries.
+        items=list(value['outbox'].values())+list(value['receipts'].values())
+        assigned=set();legacy=[]
+        for item in items:
+            if type(item)!=dict:raise TaskError('invalid_task_sync_storage')
+            order=item.get('queueOrder')
+            if order is None:
+                if type(item.get('queuedAt'))!=str:raise TaskError('invalid_task_sync_storage')
+                try:queued=datetime.fromisoformat(item['queuedAt']).timestamp()
+                except (ValueError,OverflowError,OSError):raise TaskError('invalid_task_sync_storage') from None
+                legacy.append((queued,item))
+            elif type(order)!=int or order<1 or order in assigned:raise TaskError('invalid_task_sync_storage')
+            else:assigned.add(order)
+        next_order=value.get('nextQueueOrder',1)
+        if type(next_order)!=int or next_order<1:raise TaskError('invalid_task_sync_storage')
+        next_order=max(next_order,max(assigned,default=0)+1)
+        for _,item in sorted(legacy,key=lambda entry:entry[0]):
+            item['queueOrder']=next_order;next_order+=1
+        value['nextQueueOrder']=next_order
+        return value
     def _write(self,state):
         state['revision']+=1;raw=encode(state)
         if len(raw)>MAX_STORE:raise TaskError('task_sync_capacity',409)
@@ -92,7 +115,8 @@ class TaskSync:
                 if old['digest']!=digest:raise TaskError('operation_payload_conflict',409)
                 return copy.deepcopy(old)
             if len(state['outbox'])>=500 or len(state['receipts'])>=5000:raise TaskError('task_sync_capacity',409)
-            item={'request':request,'digest':digest,'state':'pending','queuedAt':now(),'conflict':None}
+            item={'request':request,'digest':digest,'state':'pending','queuedAt':now(),'queueOrder':state['nextQueueOrder'],'conflict':None}
+            state['nextQueueOrder']+=1
             # A draft lives atomically with its immutable outbox request. Confirmed fields stay separate.
             state['outbox'][operation_id]=item;self._write(state)
         return copy.deepcopy(item)
@@ -114,6 +138,11 @@ class TaskSync:
             if error.code=='task_sync_busy':return self.snapshot()
             raise
         finally:self.exchange_lock.release()
+    def _check_connection(self,config):
+        with locked(self.lock_path):
+            live=self._read()
+            if not live['config']['enabled'] or live['config']!=config:raise TaskError('task_connection_changed',409)
+            return live
     def _exchange(self):
         with locked(self.lock_path):
             state=self._read();config=copy.deepcopy(state['config']);state['lastAttempt']=now();self._write(state)
@@ -122,11 +151,20 @@ class TaskSync:
         try:
             # Process one pending edit per existing task per exchange; do not silently chain stale edits.
             seen=set()
-            for op,item in state['outbox'].items():
+            for op,item in sorted(state['outbox'].items(),key=lambda entry:entry[1]['queueOrder']):
                 if item['state']!='pending':continue
                 request=item['request'];args=request['arguments'];task_id=args.get('taskId')
                 if task_id is not None and task_id in seen:continue
                 seen.add(task_id)
+                live=self._check_connection(config)
+                pending=live['outbox'].get(op)
+                if not pending or pending['state']!='pending' or pending['digest']!=item['digest']:raise TaskError('task_outbox_changed',409)
+                try:authorize(live['config'],request['command'],args)
+                except TaskError as error:
+                    # Revoking local permission must retain the immutable draft,
+                    # while read-only exchanges can still refresh projections.
+                    if error.status==403:continue
+                    raise
                 try:receipt=client.call(op,request['command'],args)
                 except TaskError as error:
                     if error.status in (400,403,404,409):
@@ -151,6 +189,7 @@ class TaskSync:
                         prior=live['tasks'].get(task['id'])
                         if prior is None or prior['version']<task['version']:live['tasks'][task['id']]=confirmed
                     live['receipts'][op]={**pending,'state':'acknowledged','receipt':receipt};del live['outbox'][op];self._write(live)
+            self._check_connection(config)
             snapshot=client.call('snapshot-'+uuid.uuid4().hex,'snapshot',{})
             ns=snapshot.get('sourceNamespace')
             if snapshot.get('schemaVersion')!=1 or snapshot.get('complete') is not True or type(snapshot.get('tasks'))!=list or type(snapshot.get('tombstones'))!=list:raise TaskError('incomplete_task_snapshot')

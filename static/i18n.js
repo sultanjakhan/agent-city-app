@@ -2,6 +2,8 @@
 // Trusted interface messages only. Provider/model identifiers and replies stay verbatim.
 const I18n=(()=>{
  const en={
+  'Сократи название до 500 байт UTF-8. Введённый текст сохранён в форме.':'Shorten the title to 500 UTF-8 bytes. Your text is kept in the form.',
+  'Сократи текст до 8000 байт UTF-8. Введённый текст сохранён в форме.':'Shorten the text to 8000 UTF-8 bytes. Your text is kept in the form.',
   'Результат {version}':'Result {version}',
   'Принято':'Accepted',
   'Запрошена доработка':'Changes requested',
