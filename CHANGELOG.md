@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.26 — release preparation (not published)
+
+- Combine explicit reported-model display, truthful integration observations, the own-held migration-lock fix, and project/tag/current-history filtering from PR #13.
+- Align application, UI and native version metadata without replacing the separate pending 0.5.25 candidates or draft 0.6.0 release.
+- Validate unsigned Windows QA candidates on hosted compute. Existing-key signing, signed release publication and installed-device acceptance remain separate.
+
 ## 0.5.23
 
 - Include the application's MIT license in the signed Windows package.

@@ -57,7 +57,9 @@ It provisions no service and reads no signing secret.
 For a supported update, follow `WINDOWS-UPDATES.md`: select the approved newer
 application version, build clean source, then run `New-AgentCityUpdate.ps1` under
 the existing maintainer Windows identity with its existing DPAPI-bound key. Publish
-the ZIP, signed `latest.json` and signature together. This source branch retains
-version 0.5.24 and does not publish a release or update any installed application.
+the ZIP, signed `latest.json` and signature together. The integrated source initially retained version 0.5.24. The separate release
+preparation aligns application, UI and native metadata at 0.5.26: pending 0.5.25
+candidates and the draft 0.6.0 reservation are preserved. This remains unsigned
+QA preparation; no release is published and no installed application is updated.
 The supported updater must wait for normal owner closure and backend drain; no
 active device, foreign process or draft is closed by this work.
