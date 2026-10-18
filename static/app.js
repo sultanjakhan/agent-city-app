@@ -1,5 +1,5 @@
 'use strict';
-const UI_VERSION='0.5.24';
+const UI_VERSION='0.5.26';
 const t=I18n.t;
 I18n.init();
 const $ = id => document.getElementById(id);
