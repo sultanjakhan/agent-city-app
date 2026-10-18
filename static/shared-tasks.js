@@ -35,8 +35,8 @@ function appendSharedTaskRows(){
  for(const task of Object.values(sharedState.tasks)){
   const latest=sharedRun(task),live=['running','waiting'].includes(sharedReport(latest)?.status)&&sharedRunFresh(latest),historical=!!task.completed&&!live;
   if((dashboardMode==='history')!==historical||!dashboardMatchesSearch({...task,taskKey:task.binding.taskKey,sourceId:task.id},task.reports.map(sharedReport))||!dashboardMatchesMetadata(task))continue;
-  const status=sharedReport(sharedRun(task))?.status;
-  if(dashboardMode!=='history'&&filter!=='all'&&!(filter==='working'&&status==='running'&&sharedRunFresh(sharedRun(task))||filter==='waiting'&&(status==='waiting'||task.review?.state==='awaiting_dispatch'||task.review?.state==='awaiting_review')||filter==='paused'&&status!=='running'))continue;
+  const status=sharedReport(sharedRun(task))?.status,reviewWaiting=['awaiting_dispatch','awaiting_review'].includes(task.review?.state);
+  if(dashboardMode!=='history'&&filter!=='all'&&!(reviewWaiting?filter==='waiting':filter==='working'&&status==='running'&&sharedRunFresh(sharedRun(task))||filter==='waiting'&&status==='waiting'||filter==='paused'&&status!=='running'))continue;
   const {row,main}=taskWidgetRow(task.title,{taskKey:task.binding.taskKey,onOpen:()=>openSharedTask(task.id),status:historical?(task.review?.state==='accepted'?'Результат принят':'Задача завершена'):sharedExecution(task),tone:task.review?.state==='awaiting_review'?'review':historical?'accepted':'neutral'});row.dataset.sharedTaskId=task.id;
   const metadata=dashboardMetadata(task);if(metadata.projects.length||metadata.tags.length)main.append(el('p','task-meta',[...metadata.projects,...metadata.tags].join(' · '),true));
   const run=sharedReport(sharedRun(task));main.append(el('p','task-stage',task.stage||'Этап не задан',true),el('p','task-executor',`${run?.agent||'Исполнитель неизвестен'} · ${run?.model||'Модель неизвестна'}`,true),el('p','task-meta',`Твой таймер: ${task.humanTimerActive?'идёт':'не идёт'}${task.freshness==='fresh'?'':task.freshness==='stale'?' · данные могут устареть':' · свежесть данных неизвестна'}`,true));
