@@ -34,7 +34,7 @@ class CatalogPersistenceHttpTests(unittest.TestCase):
         self.store.save()
         before = self.store.path.read_bytes()
         unrelated = copy.deepcopy({k: self.store.state[k] for k in ['favorites', 'checks']})
-        self.store.catalog_fetcher = lambda target: {'models': [{'id': 'new-unsaved'}]}
+        self.store.catalog_fetcher = lambda target: {'models': [{'id': 'new-unsaved'}], 'observedAt': '2026-10-18T04:00:00+00:00', 'sourceKind': 'new-unsaved-source'}
         with patch('server.credentials.revision', return_value='synthetic-revision'):
             self.fail_refresh('openrouter')
             value = self.snapshot()
@@ -64,7 +64,7 @@ class CatalogPersistenceHttpTests(unittest.TestCase):
         self.store.state['catalogs'].pop('openrouter', None)
         self.store.save()
         before = self.store.path.read_bytes()
-        self.store.catalog_fetcher = lambda target: {'models': [{'id': 'never-saved'}]}
+        self.store.catalog_fetcher = lambda target: {'models': [{'id': 'never-saved'}], 'observedAt': '2026-10-18T04:00:00+00:00', 'sourceKind': 'new-unsaved-source'}
         with patch('server.credentials.revision', return_value='synthetic-revision'):
             self.fail_refresh('openrouter')
             value = self.snapshot()
@@ -72,6 +72,7 @@ class CatalogPersistenceHttpTests(unittest.TestCase):
         self.assertEqual(catalog['models'], [])
         self.assertNotIn('updatedAt', catalog)
         self.assertNotIn('observedAt', catalog)
+        self.assertNotIn('sourceKind', catalog)
         self.assertTrue(catalog['attemptedAt'])
         self.assertEqual(value['connectionStatus']['openrouter']['catalog']['state'], 'missing')
         self.assertEqual(self.store.path.read_bytes(), before)
@@ -110,3 +111,17 @@ class CatalogPersistenceHttpTests(unittest.TestCase):
         self.assertEqual(row['authentication']['lastObservation']['observedAt'], value['catalogs']['openrouter']['attemptedAt'])
         self.assertEqual(row['authentication']['state'], 'not_checked')
         self.assertEqual(row['refresh']['lastResult'], 'failed')
+
+    def test_recent_prior_snapshot_does_not_turn_failed_attempt_into_success(self):
+        old = {'models': [{'id': 'recent-saved'}], 'updatedAt': '2026-10-18T04:00:00+00:00'}
+        self.store.state['catalogs']['openrouter'] = copy.deepcopy(old)
+        self.store.save()
+        self.store.catalog_fetcher = lambda target: {'models': [{'id': 'unsaved'}], 'observedAt': '2026-10-18T04:00:01+00:00'}
+        with patch('server.now', return_value='2026-10-18T04:00:01+00:00'), \
+             patch('server.credentials.revision', return_value='synthetic-revision'):
+            self.fail_refresh('openrouter')
+            value = self.snapshot()
+        self.assertEqual(value['catalogs']['openrouter']['updatedAt'], old['updatedAt'])
+        self.assertNotIn('observedAt', value['catalogs']['openrouter'])
+        self.assertEqual(value['connectionStatus']['openrouter']['refresh']['lastResult'], 'failed')
+        self.assertEqual(value['connectionStatus']['openrouter']['refresh']['error']['category'], 'storage')
