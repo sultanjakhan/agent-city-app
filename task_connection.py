@@ -108,6 +108,14 @@ class TaskConnection:
                 value['tasks']=[t for t in value.get('tasks',[]) if t.get('id') in ids]
                 value['tombstones']=[t for t in value.get('tombstones',[]) if t.get('binding',{}).get('sourceId') in ids]
         task=value.get('task',value if command=='get' else None)
+        if isinstance(task,dict) and 'taskId' in args:
+            # A valid receipt for another task must not retire this request.
+            # Keep the outcome unknown so retries reuse the original operation
+            # and run payload instead of fabricating a new launch.
+            binding=task.get('binding')
+            if task.get('id')!=args['taskId'] or (binding is not None and
+                    (not isinstance(binding,dict) or binding.get('sourceId')!=args['taskId'])):
+                raise TaskError('task_response_identity_mismatch',503)
         if isinstance(task,dict) and task.get('binding') and self.config['sourceNamespace'] and task['binding'].get('sourceNamespace')!=self.config['sourceNamespace']:
             raise TaskError('task_namespace_changed',409)
         return value
