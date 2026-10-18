@@ -30,13 +30,15 @@ function appendSharedTaskRows(){
  toolbar.replaceChildren();
  if(sharedState.config.enabled)toolbar.append(sharedButton('Добавить общую задачу',()=>openSharedTask(null),!sharedState.config.scopes.includes('tasks:write')),sharedButton('Обновить общие задачи',()=>sharedAction(()=>request('/api/task-sync/exchange',{}))));
  for(const [op,draft] of Object.entries(JSON.parse(localStorage.getItem('agent-city-shared-unsent-v1')||'{}'))){const detail=el('section','shared-pending');detail.append(el('h3','','Черновик: ответ на отправку не получен'),el('pre','',JSON.stringify(draft.arguments,null,2),true),sharedButton('Повторить ту же отправку',()=>sharedAction(()=>sendLocalSharedDraft(op))));toolbar.append(detail);}
- const query=$('dashboard-search').value.trim().toLowerCase(),filter=$('dashboard-filter').value;
+ const filter=$('dashboard-filter').value;
  let count=0;
  for(const task of Object.values(sharedState.tasks)){
-  if((dashboardMode==='history')!==!!task.completed||!`${task.title} ${task.stage||''}`.toLowerCase().includes(query))continue;
+  const latest=sharedRun(task),live=['running','waiting'].includes(sharedReport(latest)?.status)&&sharedRunFresh(latest),historical=!!task.completed&&!live;
+  if((dashboardMode==='history')!==historical||!dashboardMatchesSearch({...task,taskKey:task.binding.taskKey,sourceId:task.id},task.reports.map(sharedReport))||!dashboardMatchesMetadata(task))continue;
   const status=sharedReport(sharedRun(task))?.status;
   if(dashboardMode!=='history'&&filter!=='all'&&!(filter==='working'&&status==='running'&&sharedRunFresh(sharedRun(task))||filter==='waiting'&&(status==='waiting'||task.review?.state==='awaiting_dispatch'||task.review?.state==='awaiting_review')||filter==='paused'&&status!=='running'))continue;
-  const {row,main}=taskWidgetRow(task.title,{taskKey:task.binding.taskKey,onOpen:()=>openSharedTask(task.id),status:task.completed?(task.review?.state==='accepted'?'Результат принят':'Задача завершена'):sharedExecution(task),tone:task.review?.state==='awaiting_review'?'review':task.completed?'accepted':'neutral'});row.dataset.sharedTaskId=task.id;
+  const {row,main}=taskWidgetRow(task.title,{taskKey:task.binding.taskKey,onOpen:()=>openSharedTask(task.id),status:historical?(task.review?.state==='accepted'?'Результат принят':'Задача завершена'):sharedExecution(task),tone:task.review?.state==='awaiting_review'?'review':historical?'accepted':'neutral'});row.dataset.sharedTaskId=task.id;
+  const metadata=dashboardMetadata(task);if(metadata.projects.length||metadata.tags.length)main.append(el('p','task-meta',[...metadata.projects,...metadata.tags].join(' · '),true));
   const run=sharedReport(sharedRun(task));main.append(el('p','task-stage',task.stage||'Этап не задан',true),el('p','task-executor',`${run?.agent||'Исполнитель неизвестен'} · ${run?.model||'Модель неизвестна'}`,true),el('p','task-meta',`Твой таймер: ${task.humanTimerActive?'идёт':'не идёт'}${task.freshness==='fresh'?'':task.freshness==='stale'?' · данные могут устареть':' · свежесть данных неизвестна'}`,true));
   list.append(row);count++;
  }
@@ -76,6 +78,7 @@ function openSharedTask(id){
  const title=sharedField(dialog,'Название',task?.title||''),content=sharedField(dialog,'Описание',task?.content||'',true);
  if(!task){dialog.append(sharedButton('Создать в Cicada',()=>sharedAction(async()=>{await queueShared('create',{title:title.value,content:content.value});dialog.close();}),!sharedState.config.scopes.includes('tasks:write')));dialog.showModal();return;}
  dialog.append(el('code','source-path',`${task.id} · ${task.binding.taskKey} · версия ${task.version}`,true),el('p','',sharedExecution(task),true));
+ for(const report of task.reports){const run=sharedReport(report);if(run.runId)dialog.append(el('p','source-path','Run ID: '+run.runId,true));}
  const stage=sharedField(dialog,'Этап (ID)',task.stage||''),process=sharedField(dialog,'Процесс (ID)',task.process||'');
  const versioned=extra=>({taskId:task.id,expectedVersion:task.version,...extra});
  dialog.append(sharedButton('Сохранить изменения',()=>sharedAction(async()=>{await queueShared('patch',versioned({patch:{title:title.value,content:content.value,stage:stage.value,process:process.value}}));dialog.close();}),!sharedState.config.scopes.includes('tasks:write')));
@@ -96,6 +99,20 @@ function openSharedTask(id){
  for(const event of task.stageHistory||[])entry(t('Этап'),event.stage,event.at?when(event.at):'');
  if(history.children.length>1)dialog.append(history);dialog.showModal();
 }
+function taskConnectionStatus(current,now=Date.now()){
+ if(!current.config.enabled)return t('Обмен задачами выключен. Сохранённые данные не подтверждают текущее подключение.');
+ const entries=Object.values(current.outbox||{}),pending=entries.filter(row=>row.state==='pending').length,blocked=entries.length-pending;
+ let status;
+ if(current.failure)status=t('Ошибка обмена: ')+sharedError(current.failure.code);
+ else if(!current.lastSuccess)status=t('Ожидается первый успешный обмен. Сохранение подключения не подтверждает синхронизацию.');
+ else{
+  const age=(now-Date.parse(current.lastSuccess))/1000,fresh=Number.isFinite(age)&&age>=0&&age<=current.config.staleAfterSeconds;
+  status=!fresh?t('Данные устарели. Текущее подключение не подтверждено.'):Object.keys(current.tasks||{}).length?t('Обмен подтверждён. Показаны данные последнего успешного обмена.'):t('Обмен подтверждён. Подключённых личных задач пока нет.');
+ }
+ if(pending)status+=' '+t('Ожидают подтверждения изменения: {count}',{count:pending});
+ if(blocked)status+=' '+t('Изменения требуют проверки: {count}',{count:blocked});
+ return status;
+}
 async function renderTaskConnection(){
  let root=$('task-connection');if(!root){root=el('section','settings-group');root.id='task-connection';$('connector-settings').after(root);}
  try{
@@ -109,7 +126,7 @@ async function renderTaskConnection(){
   const scopes=[];for(const [value,name] of [['tasks:read','Чтение'],['tasks:write','Изменения'],['tasks:review','Принятие и доработка'],['tasks:execute','Отчёты исполнения']]){const l=el('label','',name),input=document.createElement('input');input.type='checkbox';input.checked=c.scopes.includes(value);input.disabled=value==='tasks:read';l.prepend(input);root.append(l);scopes.push([value,input]);}
   const ids=sharedField(root,'Разрешённые ID задач через запятую (пусто — все подключённые личные задачи)',(c.taskIds||[]).join(','));
   root.append(el('p','source-path',`Источник: ${c.sourceNamespace||'будет проверен при первом обмене'}`,true),el('p','',`Последний успешный обмен: ${current.lastSuccess?when(current.lastSuccess):'ещё не было'}`,true));
-  const status=el('p','',current.failure?sharedError(current.failure.code):'Ошибок последнего обмена нет',true);status.setAttribute('role','status');root.append(status);
+  const status=el('p','',taskConnectionStatus(current),true);status.setAttribute('role','status');root.append(status);
   const save=async()=>{const config={...c,enabled:enabled.checked,transport:transport.value,endpoint:transport.value==='http'?endpoint.value.trim():'',profile:transport.value==='pipe'?profile.value.trim():'',client:transport.value==='pipe'?client.value.trim():'',tokenEnv:transport.value==='http'?token.value.trim():'',scopes:scopes.filter(([,input])=>input.checked).map(([value])=>value),taskIds:ids.value.trim()?ids.value.split(',').map(s=>s.trim()).filter(Boolean):null};await request('/api/task-sync/configure',{config,revision:current.revision});};
   root.append(sharedButton('Сохранить подключение',()=>sharedAction(async()=>{await save();await renderTaskConnection();})),sharedButton('Сохранить и проверить обмен',()=>sharedAction(async()=>{enabled.checked=true;await save();await request('/api/task-sync/exchange',{});await renderTaskConnection();})));
  }catch(e){root.replaceChildren(el('p','',sharedError(e.message),true));}

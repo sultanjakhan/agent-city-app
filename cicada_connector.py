@@ -137,7 +137,14 @@ class CicadaConnector:
         with self._lock:
             selected, rev = self._read_settings()
             candidates = [dict(c) for c in self.candidates if Path(c["path"]).is_file() and not _has_reparse(Path(c["path"]))]
-            return {"schemaVersion": 1, "candidates": candidates, "selectedId": selected, "revision": rev}
+            snapshot = self.snapshot()
+            # A bounded read observation, never evidence of task exchange or device sync.
+            observation = {"status": snapshot["status"], "readAt": snapshot["readAt"],
+                           "taskCount": len(snapshot["tasks"]),
+                           "activeTaskCount": sum(task["isActive"] is True for task in snapshot["tasks"]),
+                           "hasMore": snapshot.get("hasMore", False)}
+            return {"schemaVersion": 1, "candidates": candidates, "selectedId": selected,
+                    "revision": rev, "observation": observation}
 
     def select(self, source_id: str | None, revision: str) -> dict[str, Any]:
         with self._lock:
@@ -305,7 +312,7 @@ class CicadaConnector:
                 stage_label = stage_map.get(stage) or (_BUILTIN.get(stage) if process == "system-analysis" else None) or stage
                 for entry in history:
                     entry["stageLabel"] = stage_map.get(entry["stage"]) or (_BUILTIN.get(entry["stage"]) if process == "system-analysis" else None) or entry["stage"]
-                result.append({"taskKey": "cicada-" + hashlib.sha256(str(path).encode()).hexdigest()[:16] + "-" + str(ident), "sourceId": str(ident), "title": str(title or "")[:500], "date": date, "plannedTime": tm, "completed": bool(completed), "isActive": bool(active), "isPaused": bool(worked_today and not active and not hidden_paused), "actualMinutes": int(seconds or 0) // 60, "process": process, "processLabel": p.get("title") or ("Системный анализ" if process == "system-analysis" else process), "stage": stage, "stageLabel": stage_label, "waiting": "task-waiting" in toks, "stageHistory": history[-200:], "lastUpdatedAt": updated})
+                result.append({"taskKey": "cicada-" + hashlib.sha256(str(path).encode()).hexdigest()[:16] + "-" + str(ident), "sourceId": str(ident), "title": str(title or "")[:500], "date": date, "plannedTime": tm, "completed": bool(completed), "isActive": bool(active), "isPaused": bool(worked_today and not active and not hidden_paused), "actualMinutes": int(seconds or 0) // 60, "process": process, "processLabel": p.get("title") or ("Системный анализ" if process == "system-analysis" else process), "stage": stage, "stageLabel": stage_label, "projects": list(dict.fromkeys(x[8:] for x in toks if x.startswith("project:") and x[8:]))[:100], "tags": [x for x in toks if not x.startswith("task-stage-log:")][:200], "waiting": "task-waiting" in toks, "stageHistory": history[-200:], "lastUpdatedAt": updated})
             return result[:500], len(result) > 500
         finally:
             con.close()

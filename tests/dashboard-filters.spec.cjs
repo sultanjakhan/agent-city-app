@@ -1,0 +1,36 @@
+const {test,expect}=require('./owner-fixture.cjs');
+const run=(runId,taskKey,status='done')=>({runId,taskKey,status,sequence:1,agent:'codex',model:null,provider:null,stage:null,skillIds:[],skills:[],mcpCalls:null,inputTokens:null,outputTokens:null,updatedAt:new Date().toISOString(),history:[]});
+
+test('project and tag filters retain all unaccepted AI work and exact identities',async({page},testInfo)=>{
+ const first={taskKey:'cicada-0123456789abcdef-first',sourceId:'first-native-id',title:'Alpha review',projects:['alpha'],tags:['tag:review'],completed:false},second={taskKey:'cicada-0123456789abcdef-second',sourceId:'second-native-id',title:'Beta build',projects:['beta'],tags:['tag:build'],completed:false};
+ await page.route('**/api/dashboard',async route=>{const body=await(await route.fetch()).json();body.cicada.tasks=[];body.cicada.historyTasks=[first,second];body.runs=[run('alpha-run',first.taskKey),run('beta-run',second.taskKey,'running'),run('unbound-run',null)];await route.fulfill({json:body});});
+ await page.goto('/#dashboard');const rows=page.locator('#dashboard-tasks .task-widget-row');await expect(rows).toHaveCount(3);
+ const alpha=rows.filter({hasText:'Alpha review'});await expect(alpha).toContainText('приёмка не подтверждена');await expect(rows.filter({hasText:'unbound-run'})).toContainText('Не привязан');await expect(rows.filter({hasText:'unbound-run'})).not.toContainText('Твой таймер');
+ await page.locator('#dashboard-project').selectOption(JSON.stringify('alpha'));await expect(rows).toHaveCount(1);await expect(alpha).toBeVisible();
+ await page.locator('#dashboard-tag').selectOption(JSON.stringify('tag:build'));await expect(rows).toHaveCount(0);await expect(page.locator('#dashboard-empty')).toBeVisible();
+ await page.locator('#dashboard-tag').selectOption(JSON.stringify('tag:review'));await expect(alpha).toBeVisible();
+ await alpha.locator('.task-widget-open').click();await expect(page.locator('#dashboard-task-body')).toContainText('Task ID: first-native-id');await expect(page.locator('#dashboard-task-body')).toContainText('Run ID: alpha-run');await page.locator('#close-dashboard-task').click();
+ await page.locator('#refresh').click();await expect(page.locator('#dashboard-project')).toHaveValue(JSON.stringify('alpha'));await expect(rows).toHaveCount(1);
+ await page.locator('#dashboard-project').selectOption('null');await page.locator('#dashboard-tag').selectOption('');await expect(rows).toHaveCount(1);await expect(rows).toContainText('unbound-run');await rows.locator('.task-widget-open').click();await expect(page.locator('#dashboard-task-body')).not.toContainText('Task ID:');await expect(page.locator('#dashboard-task-body')).toContainText('Run ID: unbound-run');await page.locator('#close-dashboard-task').click();
+ await page.locator('#dashboard-project').selectOption('');await page.locator('#dashboard-history-tab').click();await expect(rows).toHaveCount(0);
+ await page.locator('#dashboard-current-tab').click();await page.locator('#dashboard-search').fill('alpha-run');await expect(rows).toHaveCount(1);await page.locator('#dashboard-search').fill('');
+ await page.screenshot({path:testInfo.outputPath('dashboard-project-tag-desktop.png'),fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.locator('#toggle-nav').click();await expect(page.locator('#nav-backdrop')).toBeHidden();await page.locator('#dashboard-project').selectOption(JSON.stringify('beta'));await expect(rows).toHaveCount(1);await expect(rows).toContainText('Beta build');await page.locator('#dashboard-project').selectOption('');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:testInfo.outputPath('dashboard-project-tag-narrow.png'),fullPage:true});
+});
+
+test('submitted result stays current and filters by native tags until explicit acceptance',async({page})=>{
+ const task={id:'review-native-id',version:3,title:'Ready for human review',content:'Synthetic result',tags:'project:alpha,tag:review',stage:null,process:null,completed:false,humanTimerActive:false,reports:[{runId:'review-run',receivedAt:new Date().toISOString(),report:run('review-run','cicada-synthetic-review')}],results:[{version:1,content:'Result pending acceptance'}],history:[],comments:[],intents:[],review:{state:'awaiting_review',resultVersion:1},binding:{sourceNamespace:'11111111-1111-4111-8111-111111111111',sourceType:'note',sourceId:'review-native-id',taskKey:'cicada-synthetic-review'}};
+ const value={config:{enabled:true,scopes:['tasks:read','tasks:review'],staleAfterSeconds:300},tasks:{[task.id]:task},outbox:{},receipts:{},revision:1};let accepted=false;
+ await page.route('**/api/dashboard',async route=>{const body=await(await route.fetch()).json();body.cicada.tasks=[];body.cicada.historyTasks=[];body.runs=[];await route.fulfill({json:body});});await page.route('**/api/task-sync',route=>route.fulfill({json:value}));
+ await page.route('**/api/task-sync/queue',async route=>{const body=route.request().postDataJSON();expect(body.arguments.taskId).toBe(task.id);expect(body.arguments.decision).toBe('accept');accepted=true;task.completed=true;task.review.state='accepted';await route.fulfill({json:{state:'pending'}});});await page.route('**/api/task-sync/exchange',route=>route.fulfill({json:value}));
+ await page.goto('/#dashboard');await page.locator('#dashboard-project').selectOption(JSON.stringify('alpha'));await page.locator('#dashboard-tag').selectOption(JSON.stringify('tag:review'));const row=page.locator('[data-shared-task-id="review-native-id"]');await expect(row).toContainText('Результат ожидает проверки');
+ await page.locator('#dashboard-history-tab').click();await expect(row).toHaveCount(0);await page.locator('#dashboard-current-tab').click();await row.locator('.task-widget-open').click();const dialog=page.locator('#shared-task-dialog');await expect(dialog).toContainText('Run ID: review-run');expect(accepted).toBe(false);
+ await dialog.getByRole('button',{name:'Принять в историю',exact:true}).click();expect(accepted).toBe(true);await expect(row).toHaveCount(0);await page.locator('#dashboard-history-tab').click();await expect(row).toContainText('Результат принят');
+});
+
+test('fresh work on a completed native task remains current instead of hiding in history',async({page})=>{
+ const task={taskKey:'cicada-0123456789abcdef-completed',sourceId:'completed-native-id',title:'Completed task with new work',completed:true,projects:['alpha'],tags:[]};let status='running';
+ await page.route('**/api/dashboard',async route=>{const body=await(await route.fetch()).json();body.cicada.tasks=[];body.cicada.historyTasks=[task];body.runs=[run('new-work-after-completion',task.taskKey,status)];await route.fulfill({json:body});});
+ await page.goto('/#dashboard');const row=page.locator('#dashboard-tasks .task-widget-row').filter({hasText:task.title});await expect(row).toContainText('ИИ работает');await page.locator('#dashboard-history-tab').click();await expect(row).toHaveCount(0);
+ await page.locator('#dashboard-current-tab').click();status='waiting';await page.evaluate(()=>loadDashboard(true));await expect(row).toContainText('ИИ ожидает');await page.locator('#dashboard-history-tab').click();await expect(row).toHaveCount(0);
+});

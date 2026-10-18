@@ -1,0 +1,70 @@
+name: Windows cloud QA candidate
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  candidate:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      HANNI_SESSION_ID: agent-city-cloud-${{ github.run_id }}-${{ github.run_attempt }}
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+    steps:
+      - name: Set isolated SDK home
+        shell: pwsh
+        run: |
+          "DOTNET_CLI_HOME=$(Join-Path $env:RUNNER_TEMP 'agent-city-dotnet')" >> $env:GITHUB_ENV
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Source regressions
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_storage_migration.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p test_cicada_connector.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p test_dashboard_http.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p test_desktop_build_preparation.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node --test tests/actual-model.test.cjs tests/integration-states.test.cjs tests/dashboard-projection.test.cjs
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Prepare locked inputs and build exact source
+        shell: pwsh
+        run: |
+          $build = Join-Path $env:RUNNER_TEMP 'agent-city-desktop-build'
+          python tools/prepare_desktop_build.py --build-root $build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python tools/build_desktop.py --build-root $build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $results = @(Get-ChildItem -LiteralPath $build -Filter result.json -Recurse)
+          if ($results.Count -ne 1) { throw 'Expected one exact build receipt' }
+          $receipt = Get-Content -Raw -LiteralPath $results[0].FullName | ConvertFrom-Json
+          if ($receipt.sourceCommit -ne $env:SOURCE_COMMIT) { throw 'Source commit mismatch' }
+          & (Join-Path $receipt.candidate 'AgentCity.exe') --self-test
+          if ($LASTEXITCODE) { throw 'Native host self-test failed' }
+          & (Join-Path $receipt.candidate 'backend/AgentCityBackend.exe') --self-test
+          if ($LASTEXITCODE) { throw 'Frozen backend self-test failed' }
+          "CANDIDATE_PATH=$($receipt.candidate)" >> $env:GITHUB_ENV
+      - name: Retain QA candidate (unsigned, not an update release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-city-windows-qa-${{ env.SOURCE_COMMIT }}
+          path: ${{ env.CANDIDATE_PATH }}
+          if-no-files-found: error
+          retention-days: 1

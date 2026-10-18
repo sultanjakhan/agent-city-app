@@ -1,9 +1,9 @@
 const { test, expect } = require('./owner-fixture.cjs');
 
-test('live unbound reports remain accessible in history without a dashboard disclosure',async({page})=>{
+test('live unbound reports remain current until acceptance without a dashboard disclosure',async({page})=>{
  await page.route('**/api/dashboard',async route=>{const body=await(await route.fetch()).json();body.cicada.tasks=[];body.cicada.historyTasks=[];body.runs=[{runId:'synthetic-unbound-live',taskKey:null,agent:'codex',model:null,status:'running',sequence:1,updatedAt:new Date().toISOString(),mcpCalls:null,skills:[],history:[]}];await route.fulfill({json:body});});
  await page.goto('/#dashboard');await expect(page.locator('#dashboard-view details,#dashboard-view summary')).toHaveCount(0);await expect(page.locator('#work-registry')).toBeHidden();
- await page.locator('#dashboard-history-tab').click();const row=page.locator('.task-widget-row').filter({hasText:'synthetic-unbound-live'});await expect(row).toContainText('Работает');await row.locator('.task-widget-open').click();await expect(page.locator('#dashboard-task-dialog')).toContainText('Не привязан к задаче Cicada.');await expect(page.locator('#dashboard-task-dialog details,#dashboard-task-dialog summary')).toHaveCount(0);
+ const row=page.locator('.task-widget-row').filter({hasText:'synthetic-unbound-live'});await expect(row).toContainText('ИИ работает');await row.locator('.task-widget-open').click();await expect(page.locator('#dashboard-task-dialog')).toContainText('Не привязан к задаче Cicada.');await expect(page.locator('#dashboard-task-dialog details,#dashboard-task-dialog summary')).toHaveCount(0);
 });
 
 test('compact report keeps totals, six stages and fixed actions usable in both languages',async({page},testInfo)=>{
@@ -138,13 +138,13 @@ test('history groups completed executors, opens a shared link and keeps unknown 
  await expect(page.locator('#dashboard-task-title')).toHaveText('Completed QA task');
 });
 
-test('history retains metadata with unavailable task titles and escapes provider data',async({page})=>{
+test('current work retains metadata with unavailable task titles and escapes provider data',async({page})=>{
  await page.route('**/api/dashboard',async route=>{
   const body=await (await route.fetch()).json();body.cicada.tasks=[];delete body.cicada.historyTasks;
   body.runs=[{runId:'old-server-run',taskKey:'cicada-0123456789abcdef-removed',agent:'codex',model:'<img src=x onerror=alert(1)>',status:'error',updatedAt:'2026-09-27T09:00:00Z',inputTokens:null,outputTokens:null,skillIds:[],skills:[],mcpCalls:null}];
   await route.fulfill({json:body});
  });
- await page.goto('/?history=1#dashboard');
+ await page.goto('/#dashboard');
  await expect(page.locator('.dashboard-task')).toContainText('Отчёты сохранены');
  await expect(page.locator('.dashboard-task img')).toHaveCount(0);
  await page.locator('.dashboard-task .model-title').click();
@@ -180,9 +180,9 @@ test('dashboard automatically refreshes task stages and renders reported MCP cou
     await route.fulfill({json:body});
   });
   await selectSource(page,'production');await page.goto('/');
-  await expect(page.locator('.task-stage')).toContainText('Initial actual stage');
-  await expect(page.locator('.task-stage')).toContainText('New actual stage',{timeout:8000});
-  await page.locator('#dashboard-history-tab').click();await page.locator('.task-widget-row').filter({hasText:'actual-run-01'}).locator('.task-widget-open').click();await expect(page.locator('#dashboard-task-body')).toContainText('docs / search × 3');
+  await expect(page.locator('.task-stage').filter({hasText:'Initial actual stage'})).toHaveCount(1);
+  await expect(page.locator('.task-stage').filter({hasText:'New actual stage'})).toHaveCount(1,{timeout:8000});
+  await page.locator('.task-widget-row').filter({hasText:'actual-run-01'}).locator('.task-widget-open').click();await expect(page.locator('#dashboard-task-body')).toContainText('docs / search × 3');
 });
 
 async function selectSource(page, sourceId) {
