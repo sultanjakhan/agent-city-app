@@ -66,7 +66,9 @@ def summarize(snapshot):
         provenance = ('published_docs' if published else 'provider_api') if saved else 'none'
         stale = None
         if observed and current:
-            stale = (datetime.fromisoformat(current) - datetime.fromisoformat(observed)).total_seconds() > 3600
+            age = (datetime.fromisoformat(current) - datetime.fromisoformat(observed)).total_seconds()
+            if age >= 0:
+                stale = age > 3600
         auth_status = catalog.get('authStatus')
         successful_attempt = bool(attempt and updated and auth_status != 'missing_key'
                                   and 0 <= (datetime.fromisoformat(attempt) - datetime.fromisoformat(updated)).total_seconds() <= 5)

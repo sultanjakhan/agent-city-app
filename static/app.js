@@ -51,6 +51,16 @@ function when(v){return Number.isFinite(Date.parse(v))?new Date(v).toLocaleStrin
 function toast(text){$('toast').textContent=t(text);$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,3500);}
 async function request(path,body){if(window.agentCityOwnerReady&&!(await window.agentCityOwnerReady))throw Error('Откройте Agent City через launcher.');const epoch=providerStateEpoch;const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json','X-Agent-City':'1','X-Agent-City-Token':state?.csrfToken||''},body:JSON.stringify(body)}:{});const data=await r.json();if(!r.ok){if(r.status===401&&window.agentCityOwnerDenied)window.agentCityOwnerDenied();const error=Error(data.error||'Не удалось выполнить запрос');error.status=r.status;throw error;}if(data.providerRegistry&&epoch!==providerStateEpoch)return state;return data;}
 function replied(check){return ['ok','mismatch'].includes(check?.status)&&!!check?.reply&&check?.finishReason==='stop';}
+function catalogStaleness(catalog,observation){
+  if(catalog.error||observation?.stale===true)return true;
+  if(observation?.stale===null)return null;
+  const elapsed=(Date.now()-Date.parse(catalog.observedAt||catalog.updatedAt))/1000;
+  return Number.isFinite(elapsed)&&elapsed>=0?elapsed>3600:null;
+}
+function catalogPriceNote(route){
+  if(route.model.priceVerified!==true)return 'Бесплатность не подтверждена. Запрос к модели заблокирован';
+  return route.stale===false?'Нулевой тариф подтверждён каталогом':'Нулевой тариф сохранён. Перед запросом проверяется снова.';
+}
 function status(route){
   const c=route.check;
   if(sourceFor(route.provider)?.accessMode==='subscription')return {label:'Подписка · доступ не проверен',note:'',tone:'neutral'};
@@ -67,7 +77,7 @@ function models(){
   for(const [provider,catalog] of Object.entries(state.catalogs||{}))for(const m of catalog.docsOnly?[]:(sourceFor(provider)?.catalogPolicy==='all'?(catalog.allModels||catalog.models||[]):catalog.models||[])){
     if(sourceFor(provider)?.catalogPolicy!=='all'&&m.priceVerified!==true)continue;
     if(!merged.has(m.id))merged.set(m.id,{...m,routes:[]});
-    merged.get(m.id).routes.push({provider,model:m,check:state.checks?.[provider+'|'+m.id],stale:!!catalog.error||age(catalog.updatedAt)>3600,updatedAt:catalog.updatedAt});
+    merged.get(m.id).routes.push({provider,model:m,check:state.checks?.[provider+'|'+m.id],stale:catalogStaleness(catalog,state.connectionStatus?.[provider]?.catalog),updatedAt:catalog.updatedAt});
   }
   for(const id of state.favorites||[])if(!merged.has(id))merged.set(id,{id,name:id,developer:'unknown',routes:[],removed:true});
   return [...merged.values()].sort((a,b)=>Number(b.routes.some(r=>replied(r.check)))-Number(a.routes.some(r=>replied(r.check)))||Number(b.routes.some(r=>r.model.priceVerified===true))-Number(a.routes.some(r=>r.model.priceVerified===true))||a.name.localeCompare(b.name));
@@ -122,7 +132,7 @@ function renderModels(){
     const routes=provider==='all'?m.routes:m.routes.filter(r=>r.provider===provider);
     const best=routes.find(r=>replied(r.check))||routes.find(r=>r.check?.sent)||routes[0],s=best?status(best):{label:'Нет в каталоге',tone:'neutral'};
     const facts=el('div','model-facts'),badge=el('span',`status ${s.tone}`,s.label);badge.title=[s.note,best?.check?.detail].filter(Boolean).map(x=>t(x)).join(' · ');facts.append(badge);if(best?.model.priceVerified!==true)facts.append(el('span','status neutral',best?.model.priceStatus==='paid'?'Платная модель':'Цена неизвестна'));
-    if(routes.length&&routes.every(r=>r.stale))facts.append(el('span','catalog-origin','Сохранённый каталог'));
+    if(routes.length&&routes.every(r=>r.stale!==false))facts.append(el('span','catalog-origin','Сохранённый каталог'));
     const saved=state.favorites.includes(m.id),star=el('button','star',saved?'★':'☆');star.dataset.star=m.id;star.setAttribute('aria-pressed',String(saved));star.setAttribute('aria-label',`${t(saved?'Убрать из избранного':'В избранное')}: ${m.name}`);star.addEventListener('click',()=>favorite(m.id,!saved));heading.append(title,star);
     row.append(heading,facts);list.append(row);
   }
@@ -328,7 +338,7 @@ function renderDialog(){
   const m=models().find(x=>x.id===selected);if(!m)return;
   $('dialog-title').textContent=m.name;$('dialog-developer').textContent=m.developer+(m.chinese?' · '+t('Китай'):'');$('dialog-id').textContent=m.id;
   $('dialog-routes').replaceChildren();$('dialog-evidence').replaceChildren();
-  for(const r of m.routes){const row=el('div','dialog-route'),main=el('div');const s=status(r);main.append(el('strong','',providerName(r.provider),true),el('p','',`${t(s.label)}${r.check?.detail?' · '+t(r.check.detail):''}`),el('p','',r.model.priceVerified!==true?'Бесплатность не подтверждена. Запрос к модели заблокирован' :r.stale?'Нулевой тариф сохранён. Перед запросом проверяется снова.':'Нулевой тариф подтверждён каталогом'));
+  for(const r of m.routes){const row=el('div','dialog-route'),main=el('div');const s=status(r);main.append(el('strong','',providerName(r.provider),true),el('p','',`${t(s.label)}${r.check?.detail?' · '+t(r.check.detail):''}`),el('p','',catalogPriceNote(r)));
     const hasKey=state.credentials?.[r.provider],unpriced=r.model.priceVerified!==true||(r.model.kind||'chat')!=='chat'||sourceFor(r.provider)?.accessMode==='subscription',button=el('button','secondary',!hasKey?'Подключить':m.kind==='structured'||unpriced?'Условия доступа':'Проверить');
     button.disabled=!!state.busy?.includes('check');button.addEventListener('click',async()=>{if(!hasKey||m.kind==='structured'||unpriced){$('model-dialog').close();setView('connections');openProviderDetails(r.provider);return;}button.disabled=true;try{state=await request('/api/check',{provider:r.provider,model:m.id});render();}catch(e){toast(e.message);button.disabled=false;}});row.append(main,button);$('dialog-routes').append(row);
     $('dialog-evidence').append(el('p','',t('{provider} · контекст: {context} · инструменты: {tools}',{provider:providerName(r.provider),context:r.model.context?Math.round(r.model.context/1000)+'K':t('неизвестен'),tools:t(r.model.tools===true?'заявлены':r.model.tools===false?'не заявлены':'неизвестно')})));
