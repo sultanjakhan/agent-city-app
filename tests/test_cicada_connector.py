@@ -41,6 +41,78 @@ class CicadaConnectorTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_settings_observation_is_read_only_and_does_not_export_task_text(self):
+        before = self.db.read_bytes()
+        settings = self.connector.settings()
+        observation = settings['observation']
+        self.assertEqual(observation['status'], 'connected')
+        self.assertEqual(observation['taskCount'], 1)
+        self.assertEqual(observation['activeTaskCount'], 0)
+        self.assertTrue(observation['readAt'])
+        self.assertNotIn('Visible', json.dumps(settings))
+        self.assertNotIn('lastSuccess', observation)
+        self.assertEqual(before, self.db.read_bytes())
+        with closing(sqlite3.connect(self.db)) as db, db:
+            db.execute('UPDATE timeline_blocks SET is_active=1')
+        self.assertEqual(self.connector.settings()['observation']['activeTaskCount'], 1)
+
+    def test_settings_distinguishes_disconnected_empty_and_missing_saved_source(self):
+        settings = self.connector.select(None, self.connector.settings()['revision'])
+        self.assertEqual(settings['observation']['status'], 'disconnected')
+        with closing(sqlite3.connect(self.db)) as db, db:
+            db.execute('DELETE FROM items')
+        settings = self.connector.select('production', settings['revision'])
+        self.assertEqual(settings['observation']['status'], 'connected')
+        self.assertEqual(settings['observation']['taskCount'], 0)
+        revision = settings['revision']
+        self.db.unlink()
+        settings = self.connector.settings()
+        self.assertEqual(settings['selectedId'], 'production')
+        self.assertEqual(settings['revision'], revision)
+        self.assertEqual(settings['observation']['status'], 'error')
+        self.assertEqual(settings['candidates'], [])
+
+    def test_connector_http_read_save_conflict_and_read_error(self):
+        import threading
+        from urllib.request import Request
+        from urllib.error import HTTPError
+        from owner_client import authorize, owner_urlopen
+        from server import Store, Server
+        skills = self.root / 'skills'
+        skills.mkdir()
+        store = Store(self.root / 'api', skills_root=skills, executable=False,
+                      cicada_candidates=self.connector.candidates, local_only=True)
+        http = Server(('127.0.0.1', 0), store)
+        thread = threading.Thread(target=http.serve_forever, daemon=True)
+        thread.start()
+        try:
+            authorize(http)
+            base = f'http://127.0.0.1:{http.server_port}'
+            def request(payload=None):
+                req = Request(base + ('/api/connectors' if payload is None else '/api/connectors/cicada'),
+                              data=None if payload is None else json.dumps(payload).encode(),
+                              headers={'Content-Type': 'application/json', 'X-Agent-City': '1',
+                                       'X-Agent-City-Token': store.csrf_token})
+                with owner_urlopen(req, timeout=3) as response:
+                    return json.load(response)
+            current = request()
+            self.assertEqual(current['observation']['status'], 'connected')
+            self.assertNotIn('Visible', json.dumps(current))
+            disabled = request({'sourceId': None, 'revision': current['revision']})
+            self.assertEqual(disabled['observation']['status'], 'disconnected')
+            with self.assertRaises(HTTPError) as conflict:
+                request({'sourceId': 'production', 'revision': current['revision']})
+            self.assertEqual(conflict.exception.code, 409)
+            self.db.unlink()
+            saved = request({'sourceId': 'production', 'revision': disabled['revision']})
+            self.assertEqual(saved['selectedId'], 'production')
+            self.assertEqual(saved['observation']['status'], 'error')
+            self.assertEqual(request()['observation']['status'], 'error')
+        finally:
+            http.shutdown()
+            http.server_close()
+            thread.join(timeout=2)
+
     def test_requested_history_avoids_first_page_and_does_not_read_other_sources(self):
         self.connector.select('production', self.connector.settings()['revision'])
         prefix = 'cicada-' + self.connector.snapshot()['source']['sourceKey'] + '-'
@@ -113,6 +185,8 @@ class CicadaConnectorTests(unittest.TestCase):
         self.connector.select("production", self.connector.settings()["revision"])
         self.assertEqual(len(self.connector.snapshot()["tasks"]), 500)
         self.assertTrue(self.connector.snapshot()["hasMore"])
+        self.assertTrue(self.connector.settings()['observation']['hasMore'])
+        self.assertEqual(self.connector.settings()['observation']['taskCount'], 500)
         c = sqlite3.connect(self.db); c.execute("DELETE FROM items WHERE id='500'"); c.commit(); c.close()
         self.assertFalse(self.connector.snapshot()["hasMore"])
 

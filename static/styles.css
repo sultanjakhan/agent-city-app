@@ -82,7 +82,7 @@ body.nav-collapsed .compact-label { display: block; font-size: 11px; line-height
 .dashboard-tabs { margin-bottom: 20px; }
 .dashboard-actions { display: flex; flex-wrap: wrap; gap: 16px 24px; margin-top: 20px; }
 .dashboard-source .section-description { margin: 0; font-size: 14px; }
-#dashboard-filter { max-width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--ui-surface); font-size: 14px; }
+#dashboard-filter, #dashboard-project, #dashboard-tag { max-width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--ui-surface); font-size: 14px; }
 #dashboard-view .toolbar { flex-wrap: wrap; margin-bottom: 12px; }
 #dashboard-view .search-box { flex-basis: 160px; }
 .dashboard-task { padding: 20px 0; border-bottom: 1px solid var(--subtle); overflow-wrap: anywhere; }

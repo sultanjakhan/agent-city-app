@@ -46,15 +46,15 @@ test('dashboard refresh and periodic read show changed shared tasks without reop
  task.stage='review';await expect(row.locator('.task-stage')).toHaveText('review',{timeout:8000});
 });
 
-test('Cicada-style widget opens exact-ID review from its arrow and stays within narrow/dark layouts',async({page})=>{
+test('Cicada-style widget opens exact-ID review from its arrow and stays within narrow/dark layouts',async({page},testInfo)=>{
  const value=fixture(),task=value.tasks['synthetic-native-1'];task.title='Проверить описание требований и сохранить замечания';
  const running=structuredClone(task);running.id='synthetic-native-2';running.binding.sourceId=running.id;running.binding.taskKey='cicada-synthetic-native-2';running.title='Подготовить план следующего этапа';running.stage='analysis';running.review=null;running.results=[];
  task.freshness='fresh';running.freshness='fresh';running.reports=[{runId:'synthetic-widget-run',agent:'Codex',model:'synthetic-model',receivedAt:new Date().toISOString(),status:'running'}];value.tasks[running.id]=running;value.lastSuccess=new Date().toISOString();value.failure=null;
- await page.route('**/api/task-sync',r=>r.fulfill({json:value}));await page.route('**/api/dashboard',async r=>{const body=await(await r.fetch()).json();body.cicada.tasks=[];await r.fulfill({json:body});});
+ await page.route('**/api/task-sync',r=>r.fulfill({json:value}));await page.route('**/api/dashboard',async r=>{const body=await(await r.fetch()).json();body.cicada.tasks=[];body.cicada.historyTasks=[];body.runs=[];await r.fulfill({json:body});});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto('/#dashboard');
  const widget=page.locator('.task-widget'),row=page.locator('[data-shared-task-id="synthetic-native-1"]');await expect(widget).toBeVisible();await expect(page.locator('#task-widget-count')).toHaveText('Показано: 2');await expect(row.locator('.task-widget-status')).toContainText('ожидает проверки');
  await expect(page.locator('#work-registry')).toBeHidden();await expect(page.locator('#dashboard-view details,#dashboard-view summary')).toHaveCount(0);await expect(page.locator('#dashboard-view')).not.toContainText('Как это считается');
- await page.screenshot({path:path.resolve('../widget-desktop-light.png'),fullPage:true});
+ await page.screenshot({path:testInfo.outputPath('widget-desktop-light.png'),fullPage:true});
  await row.getByRole('button',{name:'Открыть задачу: '+task.title,exact:true}).click();await expect(page.locator('#shared-task-dialog')).toContainText(task.id);await expect(page.locator('#shared-task-dialog')).toContainText('Результат на проверке');await page.locator('#shared-task-dialog').getByRole('button',{name:'Закрыть',exact:true}).click();
  task.title='ДлинноеНазваниеЖ文'.repeat(25);await page.reload();await expect(row).toContainText(task.title);
  for(const width of [610,390,360]){
@@ -66,7 +66,7 @@ test('Cicada-style widget opens exact-ID review from its arrow and stays within 
  }
  await row.getByRole('button',{name:'Открыть задачу: '+task.title,exact:true}).click();await expect(page.locator('#shared-task-dialog')).toContainText(task.id);await page.locator('#shared-task-dialog').getByRole('button',{name:'Закрыть',exact:true}).click();
  task.title='Проверить описание требований и сохранить замечания';await page.reload();await expect(row).toContainText(task.title);
- await page.screenshot({path:path.resolve('../widget-narrow-light.png'),fullPage:true});
- await page.evaluate(()=>document.documentElement.dataset.theme='dark');await page.screenshot({path:path.resolve('../widget-narrow-dark.png'),fullPage:true});
+ await page.screenshot({path:testInfo.outputPath('widget-narrow-light.png'),fullPage:true});
+ await page.evaluate(()=>document.documentElement.dataset.theme='dark');await page.screenshot({path:testInfo.outputPath('widget-narrow-dark.png'),fullPage:true});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect(errors).toEqual([]);
 });

@@ -38,6 +38,19 @@ class MigrationTests(unittest.TestCase):
         self.assertTrue((self.data/'skills/example/SKILL.md').exists())
         self.assertEqual(len(list(self.root.glob('connection.json.before-migration-*'))),1)
 
+    def test_default_nested_panel_migrates_while_own_writer_lock_is_held(self):
+        panel = self.data / 'panel'
+        panel.mkdir()
+        (panel / 'task-sync.json').write_text('{"nativeId":"nested-original","revision":7}', encoding='utf-8')
+        config = {**self.config, 'panelDirectory': str(panel)}
+        self.pointer.write_text(json.dumps(config), encoding='utf-8')
+        self.assertEqual(self.prepare()['state'], 'prepared')
+        result = migration.apply_prepared(self.pointer)
+        self.assertEqual(result['state'], 'complete')
+        moved = json.loads(self.pointer.read_text('utf-8'))
+        self.assertEqual(Path(moved['panelDirectory'], 'task-sync.json').read_bytes(), (panel / 'task-sync.json').read_bytes())
+        self.assertFalse(Path(moved['panelDirectory'], '.storage-writer.lock').exists())
+
     def test_no_merge_into_nonempty_or_overlapping_folder(self):
         destination=self.root/'existing';destination.mkdir();(destination/'foreign.txt').write_text('keep')
         for path in (destination,self.data/'nested',self.root):

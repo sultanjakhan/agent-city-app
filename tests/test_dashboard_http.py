@@ -72,6 +72,18 @@ class DashboardHttpTests(unittest.TestCase):
         self.assertEqual(value['cicada']['historyStatus'], 'disconnected')
         self.assertEqual(len(value['runs']), 1)
 
+    def test_dashboard_reads_project_tags_without_copying_notes_or_stage_logs(self):
+        with closing(sqlite3.connect(self.db)) as db, db:
+            db.execute("UPDATE items SET tags=?,notes=?", ('project:alpha,project:beta,tag:review,task-sphere:personal,task-stage-log:analysis@2026-10-18', 'private note never exposed'))
+        before = self.db.read_bytes()
+        value = self.store.dashboard()
+        task = value['cicada']['tasks'][0]
+        self.assertEqual(task['projects'], ['alpha', 'beta'])
+        self.assertIn('tag:review', task['tags'])
+        self.assertNotIn('private note never exposed', json.dumps(value))
+        self.assertFalse(any(tag.startswith('task-stage-log:') for tag in task['tags']))
+        self.assertEqual(before, self.db.read_bytes())
+
     def test_history_excludes_unreported_tasks_and_foreign_source_ids(self):
         from test_run_store import report
         with closing(sqlite3.connect(self.db)) as db, db:

@@ -86,7 +86,7 @@ function drawTaskReport(task,runs){
  for(const stage of report.stages){
   const detail=el('section','stage-report'),summary=el('header','stage-report-heading'),state=groupState(stage.runs),main=el('span','stage-main'),end=el('span','stage-end');
   const dot=el('span','stage-dot '+state.tone);dot.setAttribute('aria-hidden','true');
-  main.append(el('strong','',stage.stage||t('Этап не сообщён'),true),el('span','stage-report-models',stage.totals.models.join(', ')||[...new Set(stage.runs.map(r=>r.agent))].join(', '),true));
+  main.append(el('strong','',stage.stage||t('Этап не сообщён'),true),el('span','stage-report-models',[...new Set(stage.runs.map(r=>r.model||t('Модель не сообщена')))].join(', '),true));
   const known=tokenSummary(stage.totals).known,tokens=el('span','stage-report-tokens'+(known?'':' missing'),known?compactTokens(stage.totals):t('Нет счётчика'),true);if(!known){tokens.title=t('Расход токенов не передан');tokens.setAttribute('aria-label',t('Расход токенов не передан'));}
   end.append(tokens,el('span','stage-report-state '+state.tone,state.label));
   summary.append(dot,main,end,stageResources(stage.totals));detail.append(summary,...stage.runs.map(run=>drawRun(run,{inline:stage.runs.length===1})));section.append(detail);
@@ -121,24 +121,50 @@ async function loadDashboard(force=false){
 function scheduleDashboard(){if(dashboardTimer)return;if(view==='dashboard')dashboardTimer=setTimeout(()=>{dashboardTimer=null;if(view==='dashboard')loadDashboard(true);},5000);}
 function renderDashboard(){loadDashboard();if(typeof loadSharedTasks==='function')loadSharedTasks();if(typeof renderDataSourceDashboard==='function')renderDataSourceDashboard();}
 function taskRuns(task){return task._runs||(dashboardData?.runs||[]).filter(r=>(task.runTaskKeys||[task.taskKey]).includes(r.taskKey));}
-function historyEntries(){
+// Group only by confirmed source aliases. Unbound reports retain their run identity.
+function dashboardReportEntries(){
  const known=new Map([...(dashboardData?.cicada?.tasks||[]),...(dashboardData?.cicada?.historyTasks||[])].flatMap(task=>(task.runTaskKeys||[task.taskKey]).map(key=>[key,task])));
  const grouped=new Map();
- for(const run of dashboardData?.runs||[]){const key=run.taskKey||`run:${run.originDevice||'local'}:${run.runId}`;if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(run);}
- return [...grouped].filter(([key,runs])=>!(typeof isSharedTask==='function'&&isSharedTask(key))&&(!known.has(key)||!runs.some(freshRun))).map(([key,runs])=>{
-  runs.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
-  const task=known.get(key);
-  const unbound=!key.startsWith('cicada-');
-  return {...(task?{...task,taskKey:key}:{taskKey:key,title:(unbound?t('Запуск без задачи')+' · '+runs[0].runId:t('Задача Cicada')+' · '+key.slice(7,13)+'…'+key.slice(-12)),missingSource:true,unbound}),_runs:runs,lastReportAt:runs[0].updatedAt};
+ for(const run of dashboardData?.runs||[]){const task=known.get(run.taskKey),key=task?.taskKey||run.taskKey||`run:${run.originDevice||'local'}:${run.runId}`;if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(run);}
+ return [...grouped].filter(([key])=>!(typeof isSharedTask==='function'&&isSharedTask(key))).map(([key,runs])=>{
+  runs.sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));const task=known.get(key),unbound=!runs[0].taskKey;
+  return {...(task?{...task,taskKey:key}:{taskKey:key,title:(unbound?t('Запуск без задачи')+' · '+runs[0].runId:t('Задача Cicada')+' · '+key.slice(7,13)+'…'+key.slice(-12)),missingSource:true,unbound}),_runs:runs,lastReportAt:runs[0].updatedAt||''};
  }).sort((a,b)=>b.lastReportAt.localeCompare(a.lastReportAt));
 }
-function findDashboardTask(key){return dashboardData?.cicada.tasks.find(task=>(task.runTaskKeys||[task.taskKey]).includes(key))||historyEntries().find(task=>task.taskKey===key);}
+function dashboardTaskInHistory(task){return task.completed===true&&!taskRuns(task).some(freshRun);}
+function historyEntries(){return dashboardReportEntries().filter(dashboardTaskInHistory);}
+function currentDashboardEntries(){
+ const tasks=new Map((dashboardData?.cicada?.tasks||[]).filter(task=>!task.completed).map(task=>[task.taskKey,task]));
+ for(const task of dashboardReportEntries())if(!dashboardTaskInHistory(task))tasks.set(task.taskKey,task);
+ return [...tasks.values()];
+}
+function findDashboardTask(key){return [...(dashboardData?.cicada?.tasks||[]),...dashboardReportEntries()].find(task=>(task.runTaskKeys||[task.taskKey]).includes(key));}
+function dashboardMetadata(task){
+ const tags=Array.isArray(task.tags)?task.tags:typeof task.tags==='string'?task.tags.split(',').map(x=>x.trim()).filter(Boolean):[];
+ return {projects:[...new Set([...(Array.isArray(task.projects)?task.projects:[]),...tags.filter(x=>x.startsWith('project:')).map(x=>x.slice(8))])].filter(Boolean),tags:[...new Set(tags.filter(x=>!x.startsWith('project:')&&!x.startsWith('task-stage-log:')))]};
+}
+function refreshDashboardFilters(){
+ const all=[...(dashboardData?.cicada?.tasks||[]),...(dashboardData?.cicada?.historyTasks||[]),...dashboardReportEntries(),...Object.values(typeof sharedState==='undefined'?{}:sharedState?.tasks||{})];
+ for(const [id,key,label,empty] of [['dashboard-project','projects','Все проекты','Без проекта'],['dashboard-tag','tags','Все теги','Без тегов']]){
+  const select=$(id);if(!select)continue;const selected=select.value,values=[...new Set(all.flatMap(task=>dashboardMetadata(task)[key]))].sort((a,b)=>a.localeCompare(b)),options=[['',t(label)],['null',t(empty)],...values.map(value=>[JSON.stringify(value),value])];
+  if(selected&&!options.some(([value])=>value===selected))options.push([selected,JSON.parse(selected)+' · '+t('Недоступно')]);
+  const signature=JSON.stringify(options);if(select.dataset.options!==signature){select.replaceChildren(...options.map(([value,text])=>new Option(text,value)));select.value=selected;select.dataset.options=signature;}
+ }
+}
+function dashboardMatchesMetadata(task){
+ const metadata=dashboardMetadata(task);
+ return [['dashboard-project','projects'],['dashboard-tag','tags']].every(([id,key])=>{const selected=$(id)?.value;if(!selected)return true;const value=JSON.parse(selected);return value===null?!metadata[key].length:metadata[key].includes(value);});
+}
+function dashboardMatchesSearch(task,runs=taskRuns(task)){
+ const query=$('dashboard-search').value.trim().toLowerCase(),metadata=dashboardMetadata(task);
+ return [task.title,task.stageLabel,task.stage,task.sourceId,task.taskKey,...metadata.projects,...metadata.tags,...runs.flatMap(run=>[run.runId,run.model,run.agent])].filter(Boolean).join(' ').toLowerCase().includes(query);
+}
 function syncDashboardTabs(){
  for(const button of document.querySelectorAll('[data-dashboard-mode]')){const selected=button.dataset.dashboardMode===dashboardMode;button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;}
  $('dashboard-filter').hidden=dashboardMode==='history';
 }
 function renderHistoryRows(){
- const query=$('dashboard-search').value.trim().toLowerCase(),all=historyEntries(),tasks=all.filter(task=>[task.title,...task._runs.map(r=>r.model||r.agent)].join(' ').toLowerCase().includes(query)),list=$('dashboard-tasks'),focused=document.activeElement?.dataset.taskKey;
+ const all=historyEntries(),tasks=all.filter(task=>dashboardMatchesSearch(task)&&dashboardMatchesMetadata(task)),list=$('dashboard-tasks'),focused=document.activeElement?.dataset.taskKey;
  list.replaceChildren();
  for(const task of tasks){
   const latest=task._runs[0];
@@ -162,12 +188,13 @@ function tokenText(run){return t('Вход: {input} · Выход: {output}',{in
 function modelText(run){return run.model?`${run.provider?run.provider+' · ':''}${run.model}`:t('Модель не сообщена');}
 function drawRun(run,{inline=false}={}){
  const row=el('article','run-row'+(inline?' single-attempt':'')),head=el('header','run-heading'),main=el('span','attempt-main'),state=groupState([run]);
- main.append(el('strong','',run.model||run.agent,true),el('span','attempt-subtitle',[run.agent,run.stage].filter(Boolean).join(' · '),true));
+ main.append(el('strong','',run.model||t('Модель не сообщена'),true),el('span','attempt-subtitle',[run.agent,run.stage].filter(Boolean).join(' · '),true));
  head.append(main,el('span','attempt-state '+state.tone,runState(run),true));
  if(!inline)row.append(head);
  if(run.provider||!inline)row.append(el('p','attempt-provider',modelText(run),true));
  if(run.status==='error')row.append(el('p','report-hint','Ошибка исполнителя. Причина не сообщена в отчёте.'));
  if(run.originDevice)row.append(el('p','source-path',t('Источник: {device}',{device:run.originDevice}),true));
+ row.append(el('p','source-path','Run ID: '+run.runId,true));
  const metrics=el('dl','run-metrics');
  for(const [name,value] of [['Токены',tokenText(run)],['Навыки',reportedSkills(run).map(s=>s.name).join(', ')||t('Нет данных')],['MCP',mcpText(run)],['Последний отчёт',when(run.updatedAt)]])metrics.append(el('dt','',name),el('dd','',value,true));
  row.append(metrics);
@@ -176,24 +203,26 @@ function drawRun(run,{inline=false}={}){
 }
 function renderDashboardRows(){
  if(!dashboardData)return;
- syncDashboardTabs();
+ refreshDashboardFilters();syncDashboardTabs();
  const data=dashboardData.cicada,source=data.source;
  $('dashboard-source').textContent=source?t(data.status==='connected'?'{name} · прочитано {date}':'{name} · источник недоступен',{name:source.label,date:when(data.readAt)}):t('Cicada не подключена');
  $('dashboard-error').hidden=data.status!=='error';if(data.status==='error')$('dashboard-error').textContent=t(data.error||'Не удалось прочитать Cicada. Проверь источник в настройках.');
  if(dashboardMode==='history'){renderHistoryRows();finishDashboardRender();return;}
- const query=$('dashboard-search').value.trim().toLowerCase(),filter=$('dashboard-filter').value;
- const all=data.tasks||[],tasks=all.filter(task=>!(typeof isSharedTask==='function'&&isSharedTask(task.taskKey))&&`${task.title} ${task.stageLabel||task.stage||''}`.toLowerCase().includes(query)&&(filter==='all'||filter==='working'&&(task.isActive||taskRuns(task).some(r=>r.status==='running'&&age(r.updatedAt)<=300))||filter==='waiting'&&(task.waiting||taskRuns(task).some(r=>r.status==='waiting'&&freshRun(r)))||filter==='paused'&&task.isPaused));
+ const filter=$('dashboard-filter').value;
+ const all=currentDashboardEntries(),tasks=all.filter(task=>!(typeof isSharedTask==='function'&&isSharedTask(task.taskKey))&&dashboardMatchesSearch(task)&&dashboardMatchesMetadata(task)&&(filter==='all'||filter==='working'&&(task.isActive||taskRuns(task).some(r=>r.status==='running'&&freshRun(r)))||filter==='waiting'&&(task.waiting||taskRuns(task).some(r=>r.status==='waiting'&&freshRun(r)||r.status==='done'))||filter==='paused'&&task.isPaused));
  tasks.sort((a,b)=>Number(b.isActive)-Number(a.isActive)||(a.date||'9999').localeCompare(b.date||'9999'));
  const list=$('dashboard-tasks'),focused=document.activeElement?.dataset.taskKey;list.replaceChildren();
  for(const task of tasks){
-  const reports=taskRuns(task),active=reports.some(r=>freshRun(r)&&r.status==='running'),waiting=reports.some(r=>freshRun(r)&&r.status==='waiting');
-  const status=active?'ИИ работает · по отчёту':waiting?'ИИ ожидает · по отчёту':task.isActive?'Твой таймер идёт':task.waiting?'Ожидает':task.isPaused?'На паузе':'Статус ИИ неизвестен';
+  const reports=taskRuns(task),latestReport=[...reports].sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''))[0],active=reports.some(r=>freshRun(r)&&r.status==='running'),waiting=reports.some(r=>freshRun(r)&&r.status==='waiting');
+  const status=active?'ИИ работает · по отчёту':waiting?'ИИ ожидает · по отчёту':reports.length&&reports.every(r=>r.status==='done')?'ИИ закончил · приёмка не подтверждена':latestReport?.status==='error'?'Ошибка ИИ · по отчёту':latestReport?.status==='cancelled'?'Запуск отменён · по отчёту':latestReport&&['running','waiting'].includes(latestReport.status)?'Нет свежего отчёта':task.isActive?'Твой таймер идёт':task.waiting?'Ожидает':task.isPaused?'На паузе':'Статус ИИ неизвестен';
   const {row,main}=taskWidgetRow(task.title,{taskKey:task.taskKey,onOpen:()=>openDashboardTask(task.taskKey),status});
-  main.append(el('p','task-stage',stageName(task),true));
+  if(!task.missingSource)main.append(el('p','task-stage',stageName(task),true));
+  const metadata=dashboardMetadata(task),labels=[...metadata.projects,...metadata.tags];if(labels.length)main.append(el('p','task-meta',labels.join(' · '),true));
+  if(task.missingSource)main.append(el('p','task-meta',task.unbound?'Не привязан к задаче Cicada.':'Название недоступно в выбранной Cicada. Отчёты сохранены.'));
   const meta=[task.processLabel||task.process,task.date,task.plannedTime].filter(Boolean);if(meta.length)main.append(el('p','task-meta',meta.join(' · '),true));
   const facts=taskFacts(task,reports);if(facts||!reports.length)main.append(el('p','task-executor',facts||t('Нет отчётов агента'),true));
   if(reports.length){const latest=[...reports].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))[0];main.append(el('p','task-meta',`${latest.agent||t('Исполнитель неизвестен')} · ${latest.model||t('Модель не сообщена')} · ${t('Последний отчёт')}: ${when(latest.updatedAt)}`,true));}
-  main.append(el('p','task-meta',t('Твой таймер: {state}',{state:t(task.isActive?'идёт':task.isPaused?'на паузе':'не идёт')}),true));
+  if(!task.missingSource)main.append(el('p','task-meta',t('Твой таймер: {state}',{state:t(task.isActive?'идёт':task.isPaused?'на паузе':'не идёт')}),true));
   list.append(row);
  }
  if(focused)[...list.querySelectorAll('button')].find(b=>b.dataset.taskKey===focused)?.focus({preventScroll:true});
@@ -214,9 +243,10 @@ function renderDashboardTask(){
  if(task.missingSource)body.append(el('p','report-context',task.unbound?'Не привязан к задаче Cicada.':'Название недоступно в выбранной Cicada. Отчёты сохранены.'));
  else body.append(el('p','report-context',[task.completed?t('Задача завершена в Cicada'):'Cicada · '+stageName(task),task.processLabel||task.process].filter(Boolean).join(' · '),true));
  const runs=taskRuns(task);
+ if(!task.unbound)body.append(el('p','source-path',(task.sourceId?'Task ID: '+task.sourceId:'Task key: '+task.taskKey),true));
  body.append(drawTaskReport(task,runs));
  if(task.stageHistory?.length){const detail=el('section','report-section'),list=el('ol','run-history');detail.append(el('h3','','История этапов Cicada'));for(const event of task.stageHistory)list.append(el('li','',`${event.stageLabel||event.stage||'—'} · ${when(event.at)}`,true));detail.append(list);body.append(detail);}
- const link=el('button','secondary','Ссылка');link.id='copy-report-link';link.title=t('Скопировать ссылку на отчёт');link.addEventListener('click',()=>{const url=new URL(location.href);url.search='';url.searchParams.set('task',task.taskKey);url.searchParams.set('history','1');url.hash='dashboard';navigator.clipboard.writeText(url.href).then(()=>toast('Ссылка скопирована')).catch(()=>toast('Не удалось скопировать'));});actions.append(link);
+ const link=el('button','secondary','Ссылка');link.id='copy-report-link';link.title=t('Скопировать ссылку на отчёт');link.addEventListener('click',()=>{const url=new URL(location.href);url.search='';url.searchParams.set('task',task.taskKey);if(dashboardTaskInHistory(task))url.searchParams.set('history','1');url.hash='dashboard';navigator.clipboard.writeText(url.href).then(()=>toast('Ссылка скопирована')).catch(()=>toast('Не удалось скопировать'));});actions.append(link);
  if(task.taskKey.startsWith('cicada-')){const copy=el('button','text-button','ID задачи');copy.id='copy-task-id';copy.title=t('Копировать ID задачи для агента');copy.addEventListener('click',()=>navigator.clipboard.writeText(task.taskKey).then(()=>toast('ID скопирован')).catch(()=>toast('Не удалось скопировать')));actions.append(copy);}
  const copyReport=el('button','primary','Скопировать отчёт');copyReport.id='copy-task-report';copyReport.addEventListener('click',()=>navigator.clipboard.writeText(taskReportText(task,runs)).then(()=>toast('Отчёт скопирован')).catch(()=>toast('Не удалось скопировать')));actions.prepend(copyReport);
  body.scrollTop=scroll;if(focused&&actions.contains($(focused)))$(focused).focus({preventScroll:true});
@@ -228,34 +258,55 @@ function taskKeyFromSearch(value){
 }
 function openSearchedReport(){
  const key=taskKeyFromSearch($('dashboard-search').value);if(!key)return false;
- if(!findDashboardTask(key)){toast('Отчёт не найден в этом источнике Cicada.');return true;}
- $('dashboard-search').value='';dashboardMode='history';renderDashboardRows();openDashboardTask(key);return true;
+ const task=findDashboardTask(key);if(!task){toast('Отчёт не найден в этом источнике Cicada.');return true;}
+ $('dashboard-search').value='';dashboardMode=dashboardTaskInHistory(task)?'history':'current';renderDashboardRows();openDashboardTask(key);return true;
 }
 $('close-dashboard-task').addEventListener('click',()=>{$('dashboard-task-dialog').close();dashboardTaskKey=null;});
-$('dashboard-search').addEventListener('input',renderDashboardRows);$('dashboard-filter').addEventListener('change',renderDashboardRows);
+$('dashboard-search').addEventListener('input',renderDashboardRows);for(const id of ['dashboard-filter','dashboard-project','dashboard-tag'])$(id).addEventListener('change',renderDashboardRows);
 $('dashboard-search').addEventListener('keydown',event=>{if(event.key==='Enter'&&openSearchedReport())event.preventDefault();});
 for(const button of document.querySelectorAll('[data-dashboard-mode]')){
  button.addEventListener('click',()=>{dashboardMode=button.dataset.dashboardMode;renderDashboardRows();});
  button.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const buttons=[...document.querySelectorAll('[data-dashboard-mode]')],next=buttons[event.key==='Home'?0:event.key==='End'?buttons.length-1:1-buttons.indexOf(button)];next.click();next.focus();});
 }
 
+function connectorStatus(data){
+ const observation=data.observation;
+ if(!observation)return t('Источник сохранён. Чтение ещё не проверено.');
+ if(observation.status==='disconnected')return t('Источник Cicada не подключён.');
+ if(observation.status==='error')return t('Ошибка чтения Cicada. Проверь источник и повтори проверку.');
+ if(observation.status!=='connected')return t('Состояние источника неизвестно. Повтори проверку.');
+ const activity=observation.activeTaskCount?t('Активных таймеров среди прочитанных задач: {count}',{count:observation.activeTaskCount}):observation.taskCount?t('Среди прочитанных задач активных таймеров нет.'):t('Подходящих задач в источнике пока нет.');
+ return t('Cicada доступна для чтения. Проверено {date}',{date:when(observation.readAt)})+' · '+activity+' '+t('Это не подтверждает обмен задачами или синхронизацию устройств.');
+}
 async function renderConnectors(){
  loadCloud();
  if(connectorLoading||connectorSaving)return;
- if(!connectorData){connectorLoading=true;try{connectorData=await request('/api/connectors');}catch(e){$('cicada-source-message').textContent=t(e.message);}finally{connectorLoading=false;}}
+ connectorLoading=true;$('check-cicada-source').disabled=true;$('cicada-source-status').textContent=t('Проверяем чтение Cicada…');
+ try{connectorData=await request('/api/connectors');$('cicada-source-status').textContent=connectorStatus(connectorData);}
+ catch(e){$('cicada-source-status').textContent=t('Не удалось проверить источник Cicada. Повтори проверку.');return;}
+ finally{connectorLoading=false;$('check-cicada-source').disabled=false;}
  if(!connectorData)return;
  const select=$('cicada-source'),draft=select.dataset.loaded?select.value:connectorData.selectedId||'';
+ if(connectorData.selectedId&&!connectorData.candidates.some(c=>c.id===connectorData.selectedId))connectorData.candidates.push({id:connectorData.selectedId,label:t('Сохранённый источник недоступен'),path:''});
  select.replaceChildren(new Option(t('Не подключено'),''),...connectorData.candidates.map(c=>new Option(c.label,c.id)));select.value=draft;select.dataset.loaded='true';showConnectorPath();
 }
-function showConnectorPath(){const selected=connectorData?.candidates.find(c=>c.id===$('cicada-source').value);$('cicada-source-path').textContent=selected?.path||'';}
+function showConnectorPath(){const selected=connectorData?.candidates.find(c=>c.id===$('cicada-source').value);$('cicada-source-path').textContent=selected?.path||'';$('cicada-source-message').textContent=connectorData&&($('cicada-source').value||null)!==connectorData.selectedId?t('Выбран другой источник. Сохрани выбор, чтобы применить его.'):'';}
 $('cicada-source').addEventListener('change',showConnectorPath);
+$('check-cicada-source').addEventListener('click',renderConnectors);
 $('save-cicada-source').addEventListener('click',async()=>{
- if(!connectorData||connectorSaving)return;connectorSaving=true;$('save-cicada-source').disabled=true;$('cicada-source').disabled=true;
- try{connectorData=await request('/api/connectors/cicada',{sourceId:$('cicada-source').value||null,revision:connectorData.revision});dashboardData=null;$('cicada-source-message').textContent=t('Источник сохранён. Задачи появятся на дашборде.');}
+ if(!connectorData||connectorSaving||connectorLoading)return;connectorSaving=true;$('save-cicada-source').disabled=true;$('cicada-source').disabled=true;
+ try{connectorData=await request('/api/connectors/cicada',{sourceId:$('cicada-source').value||null,revision:connectorData.revision});dashboardData=null;$('cicada-source-message').textContent=t('Выбор источника сохранён.');$('cicada-source-status').textContent=connectorStatus(connectorData);}
  catch(e){$('cicada-source-message').textContent=t(e.message);connectorData=null;}finally{connectorSaving=false;$('save-cicada-source').disabled=false;$('cicada-source').disabled=false;}
 });
 
 let cloudLoading=false,cloudTimer=null;
+function cloudStatus(data){
+ if(data.state==='paused')return t('Синхронизация приостановлена в локальном режиме.');
+ if(data.error||data.state==='error')return cloudError(data.error);
+ if(!data.configured)return t('Облако не подключено');
+ if(!data.lastSync)return t('Профиль подключён. Ожидается первый успешный обмен отчётами.');
+ return t('Последний успешный обмен отчётами: {date}',{date:when(data.lastSync)})+' '+t('Это не синхронизация задач, настроек или навыков.');
+}
 function cloudError(code){
  if(code==='unauthorized')return t('Ключ устройства отклонён. Нужен действующий профиль.');
  if(code==='revision_conflict')return t('Конфликт версии устройства. Данные сохранены; нужна проверка профиля.');
@@ -267,9 +318,9 @@ async function loadCloud(){
  if(cloudLoading)return;cloudLoading=true;
  try{
   const data=await request('/api/cloud');
-  $('cloud-status').textContent=data.error?cloudError(data.error):data.lastSync?t('Синхронизировано {date}',{date:when(data.lastSync)}):t(data.configured?'Ожидается синхронизация':'Облако не подключено');
+  $('cloud-status').textContent=cloudStatus(data);
   $('cloud-source').textContent=data.configured?data.endpoint+'\n'+t('Устройство: {device} · других устройств: {count}',{device:data.device,count:data.remoteDevices.length}):'';
-  $('sync-cloud').hidden=!data.configured;$('import-cloud').hidden=data.configured;$('cloud-help').hidden=data.configured;
+  $('sync-cloud').hidden=!data.configured||data.state==='paused';$('import-cloud').hidden=!!data.configured||data.state==='paused';$('cloud-help').hidden=!!data.configured||data.state==='paused';
  }catch(e){$('cloud-status').textContent=t(e.message);}
  finally{cloudLoading=false;if(!cloudTimer&&view==='settings'&&settingsTab==='connectors')cloudTimer=setTimeout(()=>{cloudTimer=null;if(view==='settings'&&settingsTab==='connectors')loadCloud();},5000);}
 }

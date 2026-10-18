@@ -101,14 +101,14 @@ def cancel(revision):
     job.unlink(missing_ok=True)
     return status()
 
-def inventory(root):
+def inventory(root, writer_lock=None):
     safe_path(root)
     if not root.exists():return []
     files=[];pending=[root]
     while pending:
         parent=pending.pop()
         for path in parent.iterdir():
-            if path.name=='.storage-writer.lock' and parent==root:continue
+            if path.name=='.storage-writer.lock' and (parent==root or path==writer_lock):continue
             attr=path.lstat()
             if stat.S_ISLNK(attr.st_mode) or getattr(attr,'st_file_attributes',0)&0x400:
                 raise MigrationError('В данных обнаружена ссылка: перенос отменён.')
@@ -152,7 +152,10 @@ def _apply_prepared(config):
             raise MigrationError('Профиль изменился после подготовки переноса. Исходные данные сохранены.')
         storage,target,mappings,fields=plan(value['destination'])
         pointer_raw=pointer.read_bytes();config_value=json.loads(pointer_raw.decode('utf-8-sig'))
-        inventories=[(source,dest,inventory(source)) for source,dest in mappings]
+        # The panel is usually nested under root; its held lock is runtime state,
+        # not user data, and Windows refuses to read/copy the locked byte.
+        writer_lock=storage.panel/'.storage-writer.lock'
+        inventories=[(source,dest,inventory(source,writer_lock)) for source,dest in mappings]
         total=sum(item[3] for _,_,rows in inventories for item in rows)
         if total>2*1024**3:raise MigrationError('Хранилище больше 2 ГиБ: нужен отдельный перенос.')
         ancestor=target.parent
@@ -168,7 +171,7 @@ def _apply_prepared(config):
                 copy=base/relative;copy_file(source,copy)
                 if digest(copy)!=expected or digest(source)!=expected:raise MigrationError('Данные изменились во время копирования. Исходная папка остаётся активной.')
         for source,_,rows in inventories:
-            if [(str(p),h,n) for p,_,h,n in inventory(source)]!=[(str(p),h,n) for p,_,h,n in rows]:
+            if [(str(p),h,n) for p,_,h,n in inventory(source,writer_lock)]!=[(str(p),h,n) for p,_,h,n in rows]:
                 raise MigrationError('Запись в исходные данные ещё продолжается. Перенос отменён.')
         if pointer.read_bytes()!=pointer_raw:raise MigrationError('Указатель изменился во время переноса.')
         safe_path(target)
