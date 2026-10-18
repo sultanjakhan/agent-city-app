@@ -96,3 +96,30 @@ class ConnectionStatusTests(unittest.TestCase):
             self.assertIsNone(status.stamp(value))
         for value in [None, 'http://example.invalid', 'https://user:password@example.invalid/docs']:
             self.assertIsNone(status.public_url(value))
+
+    def test_catalog_freshness_preserves_unknown_and_exact_hour_boundary(self):
+        cases = [
+            ('2026-10-02T12:00:01Z', None),
+            ('2026-10-02T12:00:00Z', False),
+            ('2026-10-02T11:00:00Z', False),
+            ('2026-10-02T10:59:59Z', True),
+            ('2026-10-02T17:00:01+05:00', None),
+            ('2026-10-02T17:00:00+05:00', False),
+            ('2026-10-02T16:00:00+05:00', False),
+            ('2026-10-02T15:59:59+05:00', True),
+            (None, None), ('invalid', None), ('2026-10-02T12:00:00', None),
+        ]
+        for field in ['observedAt', 'updatedAt']:
+            for observed, expected in cases:
+                with self.subTest(field=field, observed=observed):
+                    snapshot = self.sample({field: observed})
+                    before = copy.deepcopy(snapshot)
+                    self.assertIs(status.summarize(snapshot)['lab']['catalog']['stale'], expected)
+                    self.assertEqual(snapshot, before)
+
+    def test_invalid_current_time_cannot_confirm_catalog_freshness(self):
+        for current in [None, 'invalid', '2026-10-02T12:00:00']:
+            with self.subTest(current=current):
+                snapshot = self.sample({'observedAt': '2026-10-02T11:00:00Z'})
+                snapshot['serverTime'] = current
+                self.assertIsNone(status.summarize(snapshot)['lab']['catalog']['stale'])
