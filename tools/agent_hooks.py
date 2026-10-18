@@ -1,6 +1,8 @@
 """Metadata-only lifecycle adapter. SQLite here is a transport outbox, not a task authority.
 
 Personal directory opt-in only. No prompt/transcript/tool arguments are stored.
+Optional taskBindings maps client + '-' + digest(session_id) to a native task UUID;
+existing bound sessions retain their identity. Unbound metadata is quietly skipped.
 An ended AI turn does not complete its Cicada task or launch a human timer.
 """
 import argparse
@@ -23,13 +25,44 @@ def eligible(cwd, roots):
     return any(path == (root := Path(item).resolve(strict=True)) or root in path.parents for item in roots)
 
 
-def enqueue(db, client, event):
+def task_uuid(value):
+    try: return isinstance(value, str) and str(uuid.UUID(value)) == value
+    except ValueError: return False
+
+
+def pending_messages(db):
+    for ident, raw in db.execute('SELECT id,value FROM outbox ORDER BY id'):
+        message = json.loads(raw)
+        if not message.get('withheld'): yield ident, message
+
+
+def reconcile_unbound(db):
+    # Retain unknown legacy requests verbatim for reconciliation, never retry a
+    # native create with no business UUID. A saved native receipt is deliverable.
+    for ident, message in list(pending_messages(db)):
+        if message.get('native') is not None: continue
+        state = json.loads(db.execute('SELECT value FROM sessions WHERE id=?', (message['session'],)).fetchone()[0])
+        payload = message.get('payload')
+        task_id = payload.get('taskId') if payload is not None else message.get('taskId', state.get('taskId'))
+        if not task_uuid(task_id):
+            message['withheld'] = 'unbound-native-registration'
+            db.execute('UPDATE outbox SET value=? WHERE id=?', (json.dumps(message), ident))
+
+
+def enqueue(db, client, event, bindings=None):
     """Capture only observed identifiers/status. Never read prompt or transcript."""
     session = event.get('session_id')
     if not isinstance(session, str) or not 1 <= len(session) <= 100: raise ValueError('session identity unavailable')
     key = client + '-' + digest(session)
     prior = db.execute('SELECT value FROM sessions WHERE id=?', (key,)).fetchone()
     state = json.loads(prior[0]) if prior else {'taskId':None,'runId':None,'sequence':0,'model':None}
+    explicit = (bindings or {}).get(key)
+    if explicit is not None:
+        if not task_uuid(explicit): raise ValueError('native business UUID required')
+        if state['taskId'] and state['taskId'] != explicit: raise ValueError('session task binding conflict')
+        state['taskId'] = explicit
+    # Hook activity proves executor activity, not authorization to create work.
+    if not task_uuid(state['taskId']): return
     name = event['hook_event_name']
     if name == 'UserPromptSubmit':
         turn = event.get('turn_id') if client == 'codex' else None
@@ -46,7 +79,7 @@ def enqueue(db, client, event):
         if state.get('acknowledged'):
             # Refresh only on observed tool activity, at most once per minute.
             # Retry a pending snapshot before appending another one during an outage.
-            if any(json.loads(row[0])['session']==key for row in db.execute('SELECT value FROM outbox')): return
+            if any(row['session']==key for _, row in pending_messages(db)): return
             elapsed = now - state.get('lastActivityAt',0)
             if 0 <= elapsed < 60: return
             state['sequence'] += 1; action = 'report'
@@ -59,16 +92,16 @@ def enqueue(db, client, event):
         if state.get('terminal'): return
         if not state.get('acknowledged'):
             if name!='Stop': return
-            # A completed text-only turn proves actual work. Queue its initial
+            # For explicitly bound work only, queue its initial
             # acknowledged snapshot followed by the terminal snapshot together.
-            enqueue(db,client,dict(event,hook_event_name='PreToolUse'))
+            enqueue(db,client,dict(event,hook_event_name='PreToolUse'),bindings)
             state=json.loads(db.execute('SELECT value FROM sessions WHERE id=?',(key,)).fetchone()[0])
         state['sequence'] += 1; state['terminal'] = True; action = 'report'
     else: return
     if action == 'begin': state['terminal'] = False
     report = dict(runId=state['runId'],sequence=state['sequence'],taskKey=None,agent=client,model=state['model'],
                   provider=None,stage=None,status=status,skillIds=[],mcpCalls=None,inputTokens=None,outputTokens=None)
-    message = {'session':key,'operationId':str(uuid.uuid4()),'action':action,'report':report,'payload':None,'native':None}
+    message = {'taskId':state['taskId'],'session':key,'operationId':str(uuid.uuid4()),'action':action,'report':report,'payload':None,'native':None}
     if db.execute('SELECT count(*) FROM outbox').fetchone()[0]>=500: raise ValueError('transport capacity')
     db.execute('INSERT INTO outbox(value) VALUES(?)', (json.dumps(message),))
     db.execute('INSERT INTO sessions(id,value) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value', (key,json.dumps(state)))
@@ -77,13 +110,15 @@ def enqueue(db, client, event):
 def drain(db, cicada, city):
     # Exclusive transaction serializes lifecycle callbacks and retries the exact
     # saved native request after a lost response. Application writes stay native.
-    while (pending := db.execute('SELECT id,value FROM outbox ORDER BY id LIMIT 1').fetchone()):
-        ident, raw = pending; message = json.loads(raw)
+    while (pending := next(pending_messages(db), None)):
+        ident, message = pending
         state = json.loads(db.execute('SELECT value FROM sessions WHERE id=?',(message['session'],)).fetchone()[0])
         if message['payload'] is None:
-            task = invoke('cicada',cicada,'cicada_read_task',{'taskId':state['taskId']}) if state['taskId'] else None
-            body = {'operationId':message['operationId'],'taskId':state['taskId'],'expectedVersion':task['version'] if task else None,'report':message['report']}
-            if message['action']=='begin': body.update(title=message['report']['agent'].capitalize()+' · чат '+message['session'][-8:],content='',projects=['ai'])
+            task_id = message.get('taskId', state['taskId'])
+            if not task_uuid(task_id): raise ValueError('native business UUID required')
+            task = invoke('cicada',cicada,'cicada_read_task',{'taskId':task_id})
+            body = {'operationId':message['operationId'],'taskId':task_id,'expectedVersion':task['version'],'report':message['report']}
+            if message['action']=='begin': body.update(title='',content='',projects=[])
             if message['action']=='report' and task is None: raise ValueError('native task unavailable')
             message['payload'] = body
             db.execute('UPDATE outbox SET value=? WHERE id=?',(json.dumps(message),ident)); db.commit(); db.execute('BEGIN IMMEDIATE')
@@ -104,8 +139,11 @@ def process(config, client, event, bridges=None):
     with closing(sqlite3.connect(path,timeout=2)) as db:
         db.execute('CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,value TEXT NOT NULL)')
         db.execute('CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY,value TEXT NOT NULL)')
-        db.commit(); db.execute('BEGIN IMMEDIATE'); enqueue(db,client,event); db.commit(); db.execute('BEGIN IMMEDIATE')
-        if not db.execute('SELECT 1 FROM outbox LIMIT 1').fetchone(): return
+        db.commit(); db.execute('BEGIN IMMEDIATE')
+        reconcile_unbound(db)
+        enqueue(db,client,event,config.get('taskBindings'))
+        db.commit(); db.execute('BEGIN IMMEDIATE')
+        if next(pending_messages(db), None) is None: return
         cicada, city = bridges or (Bridge('cicada',config['cicadaProfile'],config['client']),Bridge('agent-city',config['cityProfile'],config['client']))
         drain(db,cicada,city)
 

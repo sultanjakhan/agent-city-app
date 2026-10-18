@@ -3,6 +3,7 @@
 ## 0.5.27 — combined cloud candidate (not published)
 
 - Add same-account native update status/check and exact-source idle-close requests, with draft/uncertainty deferral and the existing verified graceful updater path.
+- Require a native business task binding for automatic lifecycle hooks; preserve bound reporting and retain unbound legacy requests without retrying task creation.
 - Retain exact task/operation/run identity when launch or sync receipts name another task; keep drafts for safe replay.
 - Return private owner-process setup failures without leaking exception arguments; reject redirected writer locks without replacing active lock files.
 - Prevent automatic cross-provider retries after a model request was sent; treat empty environment keys as unavailable and redact key-save failures.

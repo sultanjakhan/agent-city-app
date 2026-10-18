@@ -36,7 +36,7 @@ jobs:
         run: |
           python tools/verify_separation.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          foreach ($pattern in @('test_task_connection_identity.py', 'test_task_sync.py', 'test_owner_transport.py', 'test_storage_lock.py', 'test_availability.py', 'test_batch_checks.py', 'test_key_rotation.py', 'test_separation_reviewed_assets.py')) {
+          foreach ($pattern in @('test_agent_hooks.py', 'test_task_connection_identity.py', 'test_task_sync.py', 'test_owner_transport.py', 'test_storage_lock.py', 'test_availability.py', 'test_batch_checks.py', 'test_key_rotation.py', 'test_separation_reviewed_assets.py')) {
             python -m unittest discover -s tests -p $pattern
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
