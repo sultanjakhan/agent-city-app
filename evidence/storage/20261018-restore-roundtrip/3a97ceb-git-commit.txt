@@ -1,0 +1,6 @@
+tree 1abb2405ff16004978dc55d57c1e8985dfc382c5
+parent 250401bad7c52029d92351f6da10ff70e4c814ae
+author Codex <codex@openai.com> 1792309187 +0200
+committer Codex <codex@openai.com> 1792309187 +0200
+
+Verify isolated canonical storage restore and Cicada reference identity

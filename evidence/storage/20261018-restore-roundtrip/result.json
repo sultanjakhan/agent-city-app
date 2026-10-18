@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "taskId": "49b7a775-4d5d-442d-9498-e5b2168ced85",
+  "runId": "cloud-agentcity-storage-delivery-20261018",
+  "coordinatorAdoptionClaim": "job-01a14ec6-storage-adopt-claim",
+  "resultOrigin": "Retained successful execution output; not rerun for publication",
+  "executionReference": "exec-e4d8a020-b7b3-402f-81d3-8c9014ac1ff9",
+  "sourceRevisionUnderTest": "250401bad7c52029d92351f6da10ff70e4c814ae",
+  "sourceTreeUnderTest": "15fe612b2f1b79ac4da9223c92bb11f7bacfeb23",
+  "localTestCommit": "3a97ceb637576177870bc52dd381c67cd8e38ce6",
+  "localTestTree": "1abb2405ff16004978dc55d57c1e8985dfc382c5",
+  "testPath": "tests/test_storage_restore_roundtrip.py",
+  "testSha256": "10ff5c2f67b57fd38c9c4f31439137529fc0003488111150c0a85e8d0edeeb5f",
+  "patchSha256": "533f7f690c9f2d35dbbd619542b380f140270bb6e3849467e34cca2dc95e34ef",
+  "gitCommitObjectSha256": "74e32fbb6e72fff309e7ad90c40ad7ed8a71ace2a680a03018faed6eb2d6c2bb",
+  "environment": {
+    "compute": "cloud",
+    "os": "Linux",
+    "data": "disposable synthetic filesystem and SQLite fixture",
+    "productionProfilesOpened": false,
+    "realCredentialOperations": false
+  },
+  "retainedStdout": {
+    "storageRoundTrip": "PASS",
+    "source": "250401bad7c52029d92351f6da10ff70e4c814ae",
+    "canonicalPathsRestored": true,
+    "userFileHashesPreserved": true,
+    "freshProcessReadback": true,
+    "cicadaReferenceAndNativeIdentityPreserved": true,
+    "syntheticCicadaDatabaseUnchanged": true,
+    "trackedApplicationFilesUnchanged": true,
+    "productionMigration": false,
+    "cicadaInstalledAcceptance": false
+  },
+  "retainedUnittestSummary": "Ran 1 test in 0.082s; OK",
+  "remainingRequirement": "Independent installed/runtime evidence for the original broader code/data/skills separation and complete restore scope, including existing Cicada owner receipts; this cloud fixture is not installed acceptance. No production migration requested.",
+  "nativeResult1Replaced": false,
+  "selfAccepted": false,
+  "publishedTestCommit": "dd43c7b7a6698d7ff10d2e7251acbfa829022ad8",
+  "publishedTestTree": "1abb2405ff16004978dc55d57c1e8985dfc382c5",
+  "publicationNote": "GitHub connector assigns commit metadata. Exact original local commit body is retained beside this receipt and reconstructs Git object 3a97ceb637576177870bc52dd381c67cd8e38ce6."
+}
