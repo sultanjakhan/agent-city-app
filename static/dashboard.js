@@ -233,7 +233,7 @@ function renderDashboardRows(){
 }
 function finishDashboardRender(){
  refreshTaskWidgetCount();
- if(dashboardLinkPending&&findDashboardTask(dashboardLinkPending)){const key=dashboardLinkPending;dashboardLinkPending=null;openDashboardTask(key);}
+ if(dashboardLinkPending&&openDashboardKey(dashboardLinkPending))dashboardLinkPending=null;
  if(dashboardTaskKey&&$('dashboard-task-dialog').open)renderDashboardTask();
 }
 function renderDashboardTask(){
@@ -256,10 +256,19 @@ function taskKeyFromSearch(value){
  const text=value.trim();if(/^(cicada-|run:)[A-Za-z0-9_.:-]+$/.test(text))return text;
  try{const url=new URL(text);return ['http:','https:'].includes(url.protocol)&&url.searchParams.get('task')||null;}catch{return null;}
 }
+function findSharedDashboardTask(key){return Object.values(typeof sharedState==='undefined'?{}:sharedState?.tasks||{}).find(task=>task.binding.taskKey===key);}
+function openDashboardKey(key){
+ const shared=findSharedDashboardTask(key);
+ if(shared){openSharedTask(shared.id);return true;}
+ const task=findDashboardTask(key);if(!task)return false;
+ openDashboardTask(key);return true;
+}
 function openSearchedReport(){
  const key=taskKeyFromSearch($('dashboard-search').value);if(!key)return false;
- const task=findDashboardTask(key);if(!task){toast('Отчёт не найден в этом источнике Cicada.');return true;}
- $('dashboard-search').value='';dashboardMode=dashboardTaskInHistory(task)?'history':'current';renderDashboardRows();openDashboardTask(key);return true;
+ const shared=findSharedDashboardTask(key),task=shared||findDashboardTask(key);
+ if(!task){toast('Отчёт не найден в этом источнике Cicada.');return true;}
+ const latest=shared&&sharedRun(shared),live=latest&&['running','waiting'].includes(sharedReport(latest)?.status)&&sharedRunFresh(latest);
+ $('dashboard-search').value='';dashboardMode=shared?(shared.completed&&!live?'history':'current'):dashboardTaskInHistory(task)?'history':'current';renderDashboardRows();openDashboardKey(key);return true;
 }
 $('close-dashboard-task').addEventListener('click',()=>{$('dashboard-task-dialog').close();dashboardTaskKey=null;});
 $('dashboard-search').addEventListener('input',renderDashboardRows);for(const id of ['dashboard-filter','dashboard-project','dashboard-tag'])$(id).addEventListener('change',renderDashboardRows);
