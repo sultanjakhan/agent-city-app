@@ -722,7 +722,14 @@ class Store:
             try:
                 self.save()
             except OSError:
-                parent[target]["error"] = "Данные получены, но не удалось сохранить их на устройстве."
+                # A fetched snapshot is not a saved catalogue until persistence succeeds.
+                # Keep the last saved payload/date, but expose this failed attempt.
+                attempted = parent[target]["attemptedAt"]
+                parent[target] = {**previous, "attemptedAt": attempted,
+                                  "error": "Данные получены, но не удалось сохранить их на устройстве."}
+                if target != "codexbar":
+                    parent[target].setdefault("models", [])
+                    parent[target].update(authStatus=auth_status, credentialRevision=revision)
             finally:
                 self.busy.discard(target)
 
