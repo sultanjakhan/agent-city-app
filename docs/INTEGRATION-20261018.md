@@ -47,11 +47,11 @@ The separation scanner reports only the existing public `desktop/AgentCity.ico`
 as an unreviewed binary. It is byte-identical to the base; this integration adds
 no binary, credentials, profile, database or private source history.
 
-The manual **Windows cloud QA candidate** workflow prepares the checked-in wheel
+The **Windows cloud QA candidate** workflow (pull requests and manual dispatch) prepares the checked-in wheel
 hashes and locked NuGet dependency, calls `tools/build_desktop.py` from an exact
 clean commit, and runs host/backend self-tests. Its one-day artifact is unsigned
-QA output, not a supported update. The workflow has not been executed here; a
-manual workflow must first be available on the default branch before dispatch.
+QA output, not a supported update. Pull-request runs check out the exact head SHA and bind the build receipt and
+artifact name to it. Manual dispatch is also available after default-branch integration.
 It provisions no service and reads no signing secret.
 
 For a supported update, follow `WINDOWS-UPDATES.md`: select the approved newer
