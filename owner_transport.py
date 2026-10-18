@@ -101,7 +101,10 @@ def spawn_owned(command,deadline,**kwargs):
                 state['child']=child;cancelled=state['cancelled']
             if cancelled:discard(child)
             else:result.put(child)
-        except OSError:result.put(None)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            # Validation and child setup failures must reach the waiting caller,
+            # without an unhandled worker traceback containing private arguments.
+            result.put(None)
     remaining(deadline)
     threading.Thread(target=create,daemon=True,name='owned-process-create').start()
     try:

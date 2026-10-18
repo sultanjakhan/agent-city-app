@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    {
+      "path": "desktop/AgentCity.ico",
+      "sha256": "f927c6c2cc79d34af8799086c38f8e3c2a3982e95a0ee2e3158c3ac5679b960d",
+      "baselineCommit": "d3aafd700e4b832f415a18311431d1c75453d8e3",
+      "review": "Public Agent City application icon visually inspected in cloud; exact bytes independently compared with the public baseline. No private content or runtime state."
+    }
+  ]
+}

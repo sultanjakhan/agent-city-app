@@ -38,3 +38,36 @@ class OwnerTransportDeadlineTests(unittest.TestCase):
             with self.assertRaises(NativeOwnershipError):retain_direct_child(root,foreign.pid)
             self.assertIsNone(foreign.poll())
         finally:foreign.terminate();foreign.wait(timeout=3)
+
+class OwnedSpawnFailureTests(unittest.TestCase):
+    def test_process_setup_failures_are_immediate_and_private(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+        from unittest.mock import patch
+        from owner_transport import spawn_owned
+        for error in (ValueError, OSError, subprocess.SubprocessError):
+            with self.subTest(error=error.__name__):
+                stderr = StringIO()
+                started = time.monotonic()
+                with redirect_stderr(stderr), patch('subprocess.Popen', side_effect=error('synthetic-private-argument')):
+                    with self.assertRaises(OSError) as failure:
+                        spawn_owned(['synthetic'], started + 1)
+                self.assertNotIsInstance(failure.exception, ControlDeadline)
+                self.assertEqual(str(failure.exception), 'owned process creation failed')
+                self.assertEqual(stderr.getvalue(), '')
+                self.assertLess(time.monotonic() - started, .5)
+
+    def test_real_invalid_argument_fails_without_creating_a_child(self):
+        from owner_transport import spawn_owned
+        with self.assertRaises(OSError) as failure:
+            spawn_owned([sys.executable, 'synthetic\0private'], time.monotonic() + 1)
+        self.assertNotIsInstance(failure.exception, ControlDeadline)
+        self.assertEqual(str(failure.exception), 'owned process creation failed')
+
+    def test_success_returns_the_exact_owned_child(self):
+        from unittest.mock import patch
+        from owner_transport import spawn_owned
+        child = object()
+        with patch('subprocess.Popen', return_value=child) as create:
+            self.assertIs(spawn_owned(['synthetic'], time.monotonic() + 1, stdin=subprocess.PIPE), child)
+        create.assert_called_once_with(['synthetic'], stdin=subprocess.PIPE)

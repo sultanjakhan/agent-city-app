@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.27 — combined cloud candidate (not published)
+
+- Add same-account native update status/check and exact-source idle-close requests, with draft/uncertainty deferral and the existing verified graceful updater path.
+- Retain exact task/operation/run identity when launch or sync receipts name another task; keep drafts for safe replay.
+- Return private owner-process setup failures without leaking exception arguments; reject redirected writer locks without replacing active lock files.
+- Prevent automatic cross-provider retries after a model request was sent; treat empty environment keys as unavailable and redact key-save failures.
+- Include the merged catalogue persistence rollback so failed writes retain prior payload/date while exposing the failed attempt.
+- Review the unchanged public application icon by exact path/hash while retaining fail-closed privacy/binary scanning.
+
 ## 0.5.26 — release preparation (not published)
 
 - Combine explicit reported-model display, truthful integration observations, the own-held migration-lock fix, and project/tag/current-history filtering from PR #13.
