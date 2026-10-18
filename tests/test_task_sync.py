@@ -46,6 +46,65 @@ class ConfigTests(unittest.TestCase):
         output=io.BytesIO();serve(Unavailable(),io.BytesIO(encode(message)+b'\n'),output)
         self.assertNotIn(b'PRIVATE_CREDENTIAL',output.getvalue());self.assertTrue(json.loads(output.getvalue())['result']['isError'])
 
+def synthetic_projection(task_id, title='Saved edit'):
+    import hashlib
+    ns='11111111-1111-4111-8111-111111111111'
+    binding={'sourceNamespace':ns,'sourceType':'note','sourceId':task_id,
+             'taskKey':'cicada-'+hashlib.sha256(ns.encode()).hexdigest()[:16]+'-'+task_id}
+    return dict(id=task_id,version=8,binding=binding,title=title,content='',tags='',
+                results=[],history=[],comments=[],intents=[],reports=[])
+
+class ReceiptIdentityTests(unittest.TestCase):
+    def test_wrong_task_ack_retains_original_draft_and_replays_exact_request(self):
+        for deleted in (False, True):
+            with self.subTest(deleted=deleted), tempfile.TemporaryDirectory() as temp:
+                op='synthetic-patch-001'
+                args={'taskId':'original-task','expectedVersion':7,'patch':{'title':'Unsaved edit'}}
+                calls=[]
+                class Client:
+                    def __init__(self, config):self.config=config
+                    def call(self, operation, command, arguments):
+                        calls.append((operation,command,copy.deepcopy(arguments)))
+                        return {'operationId':operation,'acknowledged':True,
+                                'task':{**synthetic_projection('different-task'),'deleted':deleted}}
+                sync=TaskSync(temp,Client);sync.stop.set()
+                sync.configure(configuration(Path(temp)),0)
+                queued=sync.enqueue(op,'patch',args)
+                state=sync.exchange()
+                self.assertEqual(state['failure']['code'],'task_receipt_identity_mismatch')
+                self.assertEqual(state['outbox'][op],queued)
+                self.assertNotIn(op,state['receipts'])
+                self.assertEqual(state['tasks'],{})
+                restarted=TaskSync(temp,Client)
+                restarted.exchange()
+                self.assertEqual(calls,[(op,'patch',args),(op,'patch',args)])
+
+    def test_unknown_ack_stays_pending_then_exact_replay_is_confirmed_once(self):
+        task_id='original-task'
+        task=synthetic_projection(task_id)
+        ns=task['binding']['sourceNamespace']
+        calls=[]
+        class Client:
+            def __init__(self, config):self.config=config
+            def call(self, operation, command, arguments):
+                if command=='snapshot':
+                    return dict(schemaVersion=1,complete=True,sourceNamespace=ns,tasks=[task],tombstones=[])
+                calls.append((operation,command,copy.deepcopy(arguments)))
+                return dict(operationId=operation,acknowledged=len(calls)>1,task=task)
+        with tempfile.TemporaryDirectory() as temp:
+            sync=TaskSync(temp,Client);sync.stop.set();sync.configure(configuration(Path(temp)),0)
+            args={'taskId':task_id,'expectedVersion':7,'patch':{'title':'Saved edit'}}
+            queued=sync.enqueue('synthetic-patch-002','patch',args)
+            first=sync.exchange()
+            self.assertEqual(first['outbox']['synthetic-patch-002'],queued)
+            self.assertEqual(first['failure']['code'],'unconfirmed_task_receipt')
+            state=sync.exchange()
+            self.assertEqual(state['outbox'],{})
+            self.assertEqual(state['receipts']['synthetic-patch-002']['state'],'acknowledged')
+            self.assertEqual(state['tasks'][task_id]['title'],'Saved edit')
+            sync.exchange()
+            self.assertEqual(calls,[('synthetic-patch-002','patch',args)]*2)
+
 class NativeBridge:
     def __init__(self,exe,db):
         env=dict(os.environ,CICADA_SYNTHETIC_TEST_DB=str(db))

@@ -98,6 +98,23 @@ class BatchChecksTests(unittest.TestCase):
         self.assertEqual(1, len(calls))
         self.assertTrue(self.store.batch["cancelled"])
 
+    def test_repeat_batch_never_retries_timed_out_model_on_another_provider(self):
+        self._catalogs(["openrouter", "kilo"])
+        for catalog in self.store.state["catalogs"].values():
+            catalog["models"] = [model("shared-model")]
+        calls = []
+        def probe(provider, ident, _fetcher):
+            calls.append((provider, ident))
+            return {"provider": provider, "model": ident, "status": "timeout",
+                    "reply": "", "finishReason": None, "sent": True}
+        with patch.object(server_module.access, "probe", side_effect=probe):
+            self.store.check_pending()
+            self._wait_done()
+            self.store.check_pending()
+            self._wait_done()
+        self.assertEqual([("openrouter", "shared-model")], calls)
+        self.assertEqual(0, self.store.batch["total"])
+
     def test_repeat_batch_ignores_success_and_previous_errors(self):
         self._catalogs(["openrouter"], counts=3)
         self.store.state["checks"] = {

@@ -137,7 +137,9 @@ internal sealed class CityWindow : Form
     private NativeWindowMenu? windowMenu;
     private AppUpdater? updater;
     private string? pendingUpdateJob, pendingUpdateVersion;
-    private bool updateBusy;
+    private bool updateBusy, idleCloseApproved, idleCloseReplyPending;
+    private string? lastUpdateCheckReason, lastUpdateCheckUtc, idleCloseSource;
+    private long idleCloseEpoch;
 
     private PrivateBridge bridge = new();
     private AgentPipe? agentPipe;
@@ -278,31 +280,130 @@ internal sealed class CityWindow : Form
 
     private void AcceptUpdate(UpdateCheckResult result)
     {
+        lastUpdateCheckReason = result.Reason;
+        lastUpdateCheckUtc = DateTime.UtcNow.ToString("O");
         if (closing || !result.Available || result.PendingJobPath == null) return;
         pendingUpdateJob = result.PendingJobPath;
         pendingUpdateVersion = result.Version;
         RenderStatus();
     }
 
-    private async Task CheckForUpdates()
+    private async Task CheckForUpdates(bool interactive = true)
     {
-        if (closing || updateBusy || updater == null) return;
+        if (closing || updateBusy || idleCloseReplyPending || updater == null) return;
         updateBusy = true; checkUpdates.Enabled = false;
         try
         {
             var result = await updater.CheckAndStageAsync();
             if (closing || IsDisposed) return;
             AcceptUpdate(result);
-            if (!result.Available && pendingUpdateJob == null)
+            if (interactive && !result.Available && pendingUpdateJob == null)
                 MessageBox.Show(this, NativeText(result.Reason == "not-newer" ? nameof(DesktopText.UpToDate) : nameof(DesktopText.UpdateCheckUnavailable)),
                     "Agent City", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch
         {
-            if (!closing && !IsDisposed)
+            lastUpdateCheckReason = "check-failed";
+            lastUpdateCheckUtc = DateTime.UtcNow.ToString("O");
+            if (interactive && !closing && !IsDisposed)
                 MessageBox.Show(this, NativeText(nameof(DesktopText.UpdateCheckUnavailable)), "Agent City", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         finally { updateBusy = false; checkUpdates.Enabled = !closing; }
+    }
+
+    private static string? SourceFrom(string path)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var source = document.RootElement.GetProperty("sourceCommit").GetString();
+            return source is not null && System.Text.RegularExpressions.Regex.IsMatch(source, "^[0-9a-f]{40}$") ? source : null;
+        }
+        catch { return null; }
+    }
+    private string? StagedSource()
+    {
+        try { return pendingUpdateJob is null ? null : SourceFrom(UpdateInstallJob.Load(pendingUpdateJob).ManifestPath!); }
+        catch { return null; }
+    }
+    private JsonElement UpdateStatus(string? deferral = null, bool closeQueued = false) => JsonSerializer.SerializeToElement(new
+    {
+        currentVersion = typeof(CityWindow).Assembly.GetName().Version!.ToString(3),
+        installedSourceCommit = SourceFrom(Path.Combine(AppContext.BaseDirectory, "installation.json")),
+        checking = updateBusy, staged = pendingUpdateJob is not null, stagedVersion = pendingUpdateVersion,
+        stagedSourceCommit = StagedSource(), lastCheckAt = lastUpdateCheckUtc, lastCheckReason = lastUpdateCheckReason,
+        closeQueued, deferred = deferral // Staging/close acknowledgement is not helper/application success.
+    });
+    private Task<JsonElement> DispatchAgentRequest(JsonElement request)
+    {
+        if (!request.GetProperty("path").GetString()!.StartsWith("/api/desktop/", StringComparison.Ordinal))
+            return bridge.Command("agent-request", agentRequest: request);
+        var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            BeginInvoke(async () =>
+            {
+                try { completion.TrySetResult(await DesktopRequest(request)); }
+                catch { completion.TrySetException(new InvalidOperationException("Desktop operation unavailable")); }
+            });
+        }
+        catch { completion.TrySetException(new InvalidOperationException("Desktop operation unavailable")); }
+        return completion.Task;
+    }
+    private async Task<string?> IdleCloseDeferral()
+    {
+        if (busy || closing || confirmationBusy || updateBusy || idleCloseReplyPending) return "host-busy";
+        if (!loaded || !IsCurrentLocaleDocument(documentEpoch) || view.CoreWebView2 is null) return "renderer-unavailable";
+        var epoch = documentEpoch;
+        try
+        {
+            var snapshot = await view.CoreWebView2.ExecuteScriptAsync(IdleClosePolicy.SnapshotScript).WaitAsync(TimeSpan.FromSeconds(2));
+            if (epoch != documentEpoch || !IsCurrentLocaleDocument(epoch)) return "renderer-changed";
+            return IdleClosePolicy.Deferral(snapshot);
+        }
+        catch { return "renderer-unavailable"; }
+    }
+    private async Task<JsonElement> DesktopRequest(JsonElement request)
+    {
+        var route = request.GetProperty("path").GetString();
+        if (route == "/api/desktop/update-status") return UpdateStatus(await IdleCloseDeferral());
+        if (route == "/api/desktop/update-check")
+        {
+            if (closing || busy || updater is null || idleCloseReplyPending) return UpdateStatus("host-unavailable");
+            _ = CheckForUpdates(false); // Queue once, return immediately; status reports eventual staging.
+            return UpdateStatus();
+        }
+        if (route != "/api/desktop/close-idle") throw new InvalidDataException();
+        if (pendingUpdateJob is null) return UpdateStatus("no-staged-update");
+        var expectedSource = request.GetProperty("body").GetProperty("expectedSourceCommit").GetString();
+        if (StagedSource() != expectedSource) return UpdateStatus("source-mismatch");
+        // Stop user input before observing drafts; keep disabled only if a close receipt is queued.
+        var enabled = view.Enabled; view.Enabled = false;
+        var reason = await IdleCloseDeferral();
+        if (reason is not null) { view.Enabled = enabled; return UpdateStatus(reason); }
+        if (StagedSource() != expectedSource) { view.Enabled = enabled; return UpdateStatus("source-mismatch"); }
+        idleCloseSource = expectedSource; idleCloseEpoch = documentEpoch;
+        var receipt = UpdateStatus(closeQueued: true);
+        idleCloseReplyPending = true;
+        return receipt;
+    }
+    private void AgentReplyCompleted(bool delivered)
+    {
+        try
+        {
+            BeginInvoke(() =>
+            {
+                if (!idleCloseReplyPending) return;
+                idleCloseReplyPending = false;
+                if (!delivered || busy || closing || confirmationBusy || updateBusy || documentEpoch != idleCloseEpoch ||
+                    !IsCurrentLocaleDocument(idleCloseEpoch) || StagedSource() != idleCloseSource)
+                { view.Enabled = true; return; }
+                // The same verified idle renderer is frozen until the existing graceful drain path starts.
+                idleCloseApproved = true;
+                Close();
+            });
+        }
+        catch { }
     }
 
     private async Task RefreshNativeLocale()
@@ -383,8 +484,7 @@ internal sealed class CityWindow : Form
         // Agent access is owned by the host broker and remains independent of
         // renderer startup. A slow/unavailable WebView must not block reporting.
         await bridge.Start(config, localOnly);
-        agentPipe = new AgentPipe(AgentPipe.Name(config), async request =>
-            await bridge.Command("agent-request", agentRequest: request));
+        agentPipe = new AgentPipe(AgentPipe.Name(config), DispatchAgentRequest, AgentReplyCompleted);
         agentPipe.Start();
         // Runtime only; no download/installer or system setting changes at launch.
         _ = CoreWebView2Environment.GetAvailableBrowserVersionString();
@@ -399,6 +499,7 @@ internal sealed class CityWindow : Form
         core.Settings.AreHostObjectsAllowed = false; core.Settings.IsWebMessageEnabled = false;
         core.Settings.AreDevToolsEnabled = false; core.Settings.AreDefaultContextMenusEnabled = false;
         core.Settings.AreBrowserAcceleratorKeysEnabled = false;
+        await core.AddScriptToExecuteOnDocumentCreatedAsync(IdleClosePolicy.InstallScript);
         core.NavigationStarting += (_, e) => { if (!WirePolicy.SameOrigin(e.Uri, bridge.Origin)) e.Cancel = true; else { documentEpoch++; completedEpoch = -1; localeNavigationId = e.NavigationId; locale.Invalidate(); } };
         core.NavigationCompleted += async (_, e) =>
         {
@@ -486,7 +587,8 @@ internal sealed class CityWindow : Form
     {
         if (approvedClose) return;
         e.Cancel = true;
-        if (busy || closing || (loaded && !await ConfirmDrafts(nameof(DesktopText.CloseQuestion)))) return;
+        if (busy || closing) return;
+        if (!idleCloseApproved && (loaded && !await ConfirmDrafts(nameof(DesktopText.CloseQuestion)))) return;
         closing = true; recover.Enabled = restart.Enabled = revoke.Enabled = false;
         agentPipe?.Dispose(); agentPipe = null;
         try
@@ -517,7 +619,7 @@ internal sealed class CityWindow : Form
             }
             approvedClose = true; Close();
         }
-        catch { closing = false; SetStatus(nameof(DesktopText.DrainPending)); recover.Enabled = restart.Enabled = revoke.Enabled = true; }
+        catch { closing = false; idleCloseApproved = false; view.Enabled = true; SetStatus(nameof(DesktopText.DrainPending)); recover.Enabled = restart.Enabled = revoke.Enabled = true; }
     }
     private static void DeleteOwnProfile(string path)
     {
@@ -544,6 +646,7 @@ internal static class Program
 {
     private static int SelfTest()
     {
+        if (!NativeUpdateSelfTest.Run()) return 2;
         var origin = WirePolicy.Origin(12345, "agent-city-" + new string('a', 32) + ".localhost");
         if (!WirePolicy.SameOrigin(origin.ToString(), origin) || WirePolicy.SameOrigin("https://example.org/", origin) ||
             WirePolicy.SameOrigin("http://user@" + origin.Host + ":12345/", origin) || WirePolicy.SameOrigin("http://" + origin.Host + ":12346/", origin)) return 2;

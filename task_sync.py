@@ -142,6 +142,9 @@ class TaskSync:
                     if not pending or pending['digest']!=item['digest']:raise TaskError('task_outbox_changed',409)
                     task=receipt.get('task')
                     if not isinstance(task,dict):raise TaskError('invalid_task_receipt')
+                    # An operation ACK alone cannot confirm an edit of another task.
+                    # Keep the immutable request pending for exact replay on mismatch.
+                    if task_id is not None and task.get('id')!=task_id:raise TaskError('task_receipt_identity_mismatch',409)
                     if task.get('deleted') is True:live['tasks'].pop(task['id'],None)
                     else:
                         ns=task.get('binding',{}).get('sourceNamespace')

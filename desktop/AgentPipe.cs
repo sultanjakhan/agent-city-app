@@ -12,12 +12,13 @@ internal sealed class AgentPipe : IDisposable
     private const int RequestLimit = 16000, ReplyLimit = 1024 * 1024;
     private readonly string name;
     private readonly Func<JsonElement, Task<JsonElement>> dispatch;
+    private readonly Action<bool>? replyCompleted;
     private readonly CancellationTokenSource stop = new();
     private Task? worker;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
-    public AgentPipe(string name, Func<JsonElement, Task<JsonElement>> dispatch)
-    { this.name = name; this.dispatch = dispatch; }
+    public AgentPipe(string name, Func<JsonElement, Task<JsonElement>> dispatch, Action<bool>? replyCompleted = null)
+    { this.name = name; this.dispatch = dispatch; this.replyCompleted = replyCompleted; }
     public static string Name(string config)
     {
         var sid = WindowsIdentity.GetCurrent().User?.Value ?? throw new InvalidOperationException();
@@ -42,6 +43,19 @@ internal sealed class AgentPipe : IDisposable
         string[] reads = { "/api/v1/manifest", "/api/v1/models", "/api/v1/providers", "/api/v1/skills",
             "/api/v1/skill-inventory", "/api/v1/projects", "/api/v1/extensions", "/api/v1/repositories",
             "/api/v1/rules", "/api/v1/context", "/api/v1/directory", "/api/dashboard", "/api/task-sync" };
+        if (path == "/api/desktop/update-status" && method == "GET" && value.GetProperty("body").ValueKind == JsonValueKind.Null) return value.Clone();
+        if (path == "/api/desktop/update-check" && method == "POST")
+        {
+            Exact(value.GetProperty("body"));
+            return value.Clone();
+        }
+        if (path == "/api/desktop/close-idle" && method == "POST")
+        {
+            Exact(value.GetProperty("body"), "expectedSourceCommit");
+            var commit = value.GetProperty("body").GetProperty("expectedSourceCommit").GetString();
+            if (commit is null || !System.Text.RegularExpressions.Regex.IsMatch(commit, "^[0-9a-f]{40}$")) throw new InvalidDataException();
+            return value.Clone();
+        }
         var body = value.GetProperty("body");
         if (!(method == "GET" && reads.Contains(route) && body.ValueKind == JsonValueKind.Null) &&
             !(method == "POST" && new[] { "/api/skill-activity", "/api/agent/report", "/api/task-sync/queue", "/api/task-sync/exchange", "/api/task-sync/resolve" }.Contains(route) &&
@@ -87,7 +101,9 @@ internal sealed class AgentPipe : IDisposable
                     reply = JsonSerializer.SerializeToUtf8Bytes(new { ok = true, result });
                 }
                 catch { reply = JsonSerializer.SerializeToUtf8Bytes(new { ok = false, error = "request_rejected_or_outcome_unknown" }); }
-                await Write(pipe, reply, deadline.Token);
+                var delivered = false;
+                try { await Write(pipe, reply, deadline.Token); delivered = true; }
+                finally { replyCompleted?.Invoke(delivered); }
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
             catch { if (!stop.IsCancellationRequested) await Task.Delay(100, stop.Token); }

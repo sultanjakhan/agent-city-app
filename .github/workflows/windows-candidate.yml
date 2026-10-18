@@ -34,6 +34,12 @@ jobs:
       - name: Source regressions
         shell: pwsh
         run: |
+          python tools/verify_separation.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          foreach ($pattern in @('test_agent_hooks.py', 'test_task_connection_identity.py', 'test_task_sync.py', 'test_owner_transport.py', 'test_storage_lock.py', 'test_availability.py', 'test_batch_checks.py', 'test_key_rotation.py', 'test_separation_reviewed_assets.py')) {
+            python -m unittest discover -s tests -p $pattern
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
           python -m unittest discover -s tests -p test_catalog_persistence_http.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p test_connection_status.py
@@ -46,7 +52,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p test_desktop_build_preparation.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          node --test tests/actual-model.test.cjs tests/integration-states.test.cjs tests/dashboard-projection.test.cjs tests/catalog-freshness.test.cjs tests/connection-observation.test.cjs tests/shared-review-filter.test.cjs tests/shared-navigation.test.cjs
+          node --test tests/actual-model.test.cjs tests/integration-states.test.cjs tests/dashboard-projection.test.cjs tests/catalog-freshness.test.cjs tests/connection-observation.test.cjs tests/shared-review-filter.test.cjs tests/shared-navigation.test.cjs tests/native-idle-close.test.cjs
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Prepare locked inputs and build exact source
         shell: pwsh
@@ -62,6 +68,8 @@ jobs:
           if ($receipt.sourceCommit -ne $env:SOURCE_COMMIT) { throw 'Source commit mismatch' }
           & (Join-Path $receipt.candidate 'AgentCity.exe') --self-test
           if ($LASTEXITCODE) { throw 'Native host self-test failed' }
+          & (Join-Path $receipt.candidate 'AgentCity.exe') --agent-pipe-self-test
+          if ($LASTEXITCODE) { throw 'Native pipe self-test failed' }
           & (Join-Path $receipt.candidate 'backend/AgentCityBackend.exe') --self-test
           if ($LASTEXITCODE) { throw 'Frozen backend self-test failed' }
           "CANDIDATE_PATH=$($receipt.candidate)" >> $env:GITHUB_ENV

@@ -8,9 +8,13 @@ class StorageLock:
         directory = safe_path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / '.storage-writer.lock'
-        if path.exists() and (path.is_symlink() or getattr(path.lstat(), 'st_file_attributes', 0) & 0x400):
+        if path.is_symlink() or (path.exists() and getattr(path.lstat(), 'st_file_attributes', 0) & 0x400):
             raise OSError('redirected writer lock')
-        self.stream = path.open('a+b')
+        # Reject a redirect introduced between the check and open on POSIX.
+        # Keep the same file: unlinking a lock can admit a second live writer.
+        def open_lock(name, flags):
+            return os.open(name, flags | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+        self.stream = open(path, 'a+b', opener=open_lock)
         try:
             self.stream.seek(0)
             if os.name == 'nt':

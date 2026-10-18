@@ -122,7 +122,7 @@ def _unprotect(ciphertext: bytes) -> str:
 
 def _environment(provider: str) -> str | None:
     name = ENV_KEYS.get(provider)
-    return os.environ.get(name) if name else None
+    return (os.environ.get(name) or None) if name else None
 
 
 def read_key(provider: str) -> str | None:

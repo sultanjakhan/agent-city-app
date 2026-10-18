@@ -4,7 +4,7 @@ import hashlib
 import fnmatch
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import socket
@@ -26,8 +26,34 @@ def hashes(root):
             for p in root.rglob("*") if p.is_file() and not any(x in EXCLUDES for x in p.relative_to(root).parts)}
 
 
+def reviewed_binaries():
+    """Exact reviewed public image bytes only; private-path rules still run first."""
+    path = APP / 'tools/reviewed-binaries.json'
+    if path.is_symlink() or getattr(path.lstat(), 'st_file_attributes', 0) & 0x400:
+        raise ValueError('redirected reviewed-binary manifest')
+    manifest = json.loads(path.read_text('utf-8'))
+    if set(manifest) != {'schemaVersion', 'assets'} or type(manifest['schemaVersion']) is not int or manifest['schemaVersion'] != 1 or not isinstance(manifest['assets'], list):
+        raise ValueError('invalid reviewed-binary manifest')
+    result = {}
+    for item in manifest['assets']:
+        if not isinstance(item, dict) or set(item) != {'path', 'sha256', 'baselineCommit', 'review'}:
+            raise ValueError('invalid reviewed-binary entry')
+        relative = item['path']
+        if not isinstance(relative, str) or PurePosixPath(relative).is_absolute() or '..' in PurePosixPath(relative).parts or '\\' in relative or not relative.endswith('.ico') or relative in result:
+            raise ValueError('invalid reviewed-binary path')
+        if not re.fullmatch('[0-9a-f]{64}', item['sha256']) or not re.fullmatch('[0-9a-f]{40}', item['baselineCommit']) or not isinstance(item['review'], str) or not item['review'].strip():
+            raise ValueError('invalid reviewed-binary evidence')
+        result[relative] = item['sha256']
+    return result
+
+
 def scan():
     findings = []
+    try:
+        reviewed = reviewed_binaries()
+    except (OSError, ValueError, TypeError):
+        reviewed = {}
+        findings.append({'file': 'tools/reviewed-binaries.json', 'category': 'invalid-reviewed-binary-manifest'})
     private_dirs = {".local", "local", "private", "keys", "profiles", "sessions", "backups", "exports", "logs"}
     private_patterns = {"storage.local.json", "connection.local.json", "credentials.*", "secrets.*", ".env", ".env.*", "*.dpapi", "*.pem", "*.key", "*.p12", "*.pfx", "*.db", "*.db-*", "*.sqlite*", "*.jsonl", "*.log", "*.bak", "*.backup"}
     pending = [APP]
@@ -58,7 +84,12 @@ def scan():
         try:
             content = p.read_text("utf-8")
         except UnicodeError:
-            findings.append({"file": p.relative_to(APP).as_posix(), "category": "unreviewed-binary"})
+            relative = p.relative_to(APP).as_posix()
+            raw = p.read_bytes()
+            # ICO signature plus reviewed path/hash; changed bytes never inherit approval.
+            if relative in reviewed and raw[:4] == bytes((0, 0, 1, 0)) and hashlib.sha256(raw).hexdigest() == reviewed[relative]:
+                continue
+            findings.append({"file": relative, "category": "unreviewed-binary"})
             continue
         # These are detection heuristics, not an exhaustive secret scanner.
         for category, pattern in {
@@ -138,7 +169,7 @@ def main():
         # Save/reload both projects and editable skills in the same relocated package.
         code = """
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from server import Store
 from storage_config import load_storage
 from project_library import ProjectLibrary

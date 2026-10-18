@@ -76,6 +76,40 @@ class AvailabilityTests(unittest.TestCase):
         self.assertEqual(1, result["pending"])
         self.assertEqual([{"provider": "p", "model": "m"}], result["pendingRoutes"])
 
+    def test_sent_failure_does_not_automatically_fall_back_to_another_provider(self):
+        for status in ('timeout', 'network_error', 'invalid_response', 'incomplete', 'cancelled'):
+            with self.subTest(status=status):
+                snapshot = {
+                    "credentials": {"a": True, "b": True}, "sources": [],
+                    "catalogs": {"a": {"models": [model("same")]},
+                                 "b": {"models": [model("same"), model("untouched")]}},
+                    "checks": {"a|same": check(status, sent=True)},
+                }
+                result = availability.summarize(snapshot)
+                self.assertEqual([{"provider": "b", "model": "untouched"}], result["pendingRoutes"])
+                self.assertEqual(1, result["needsRetry"])
+                self.assertEqual(1, result["pending"])
+
+    def test_removed_catalog_does_not_erase_unknown_request_outcome(self):
+        snapshot = {
+            "credentials": {"b": True}, "sources": [],
+            "catalogs": {"b": {"models": [model("same")]}},
+            "checks": {"removed-provider|same": check("timeout", sent=True)},
+        }
+        result = availability.summarize(snapshot)
+        self.assertEqual([], result["pendingRoutes"])
+        self.assertEqual(1, result["needsRetry"])
+
+    def test_unsent_failure_still_allows_another_provider(self):
+        snapshot = {
+            "credentials": {"a": True, "b": True}, "sources": [],
+            "catalogs": {"a": {"models": [model("same")]}, "b": {"models": [model("same")]}},
+            "checks": {"a|same": check("catalog_error", sent=False)},
+        }
+        result = availability.summarize(snapshot)
+        self.assertEqual([{"provider": "b", "model": "same"}], result["pendingRoutes"])
+        self.assertEqual(1, result["pending"])
+
     def test_docs_only_catalogs_are_not_availability(self):
         snapshot = {
             "credentials": {}, "sources": [],

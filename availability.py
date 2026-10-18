@@ -13,6 +13,11 @@ def responded(check):
 def summarize(snapshot):
     sources = {s['id']: s for s in snapshot.get('sources', [])}
     checks = snapshot.get('checks', {})
+    # A sent request may have completed remotely even when its reply was lost.
+    # Batch discovery must not retry that model through a different provider.
+    # Use the persisted route key, also when its original catalog was removed.
+    attempted_models = {route.partition('|')[2] for route, check in checks.items()
+                        if '|' in route and check.get('sent')}
     rows = {}
     pending = []
     blocked = set()
@@ -40,7 +45,7 @@ def summarize(snapshot):
                 row.add('needsAccess')
             elif provider in blocked:
                 row.add('needsRetry')
-            elif check.get('sent') or check.get('status') not in {None, 'skipped', 'key_changed', 'missing_key'}:
+            elif model['id'] in attempted_models or check.get('status') not in {None, 'skipped', 'key_changed', 'missing_key'}:
                 row.add('needsRetry')
             else:
                 row.add('pending')
