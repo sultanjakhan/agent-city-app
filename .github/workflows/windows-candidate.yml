@@ -44,7 +44,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p test_desktop_build_preparation.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          node --test tests/actual-model.test.cjs tests/integration-states.test.cjs tests/dashboard-projection.test.cjs tests/catalog-freshness.test.cjs
+          node --test tests/actual-model.test.cjs tests/integration-states.test.cjs tests/dashboard-projection.test.cjs tests/catalog-freshness.test.cjs tests/connection-observation.test.cjs
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Prepare locked inputs and build exact source
         shell: pwsh

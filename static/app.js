@@ -185,7 +185,10 @@ function catalogError(c,facts){
 function connectionDetails(source,c,facts){
  const box=el('section','connection-observation'),list=el('dl','connection-facts');
  const add=(label,text)=>list.append(el('dt','',label),el('dd','',text,true));
- const date=c.observedAt||c.updatedAt,published=c.catalogScope==='published'||String(c.sourceKind||'').startsWith('official_docs');
+ const catalog=facts?.catalog;
+ const validDate=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))?value:null;
+ const date=catalog?(catalog.observedAt||catalog.updatedAt):validDate(c.observedAt)||validDate(c.updatedAt);
+ const published=catalog?catalog.source==='published_docs':c.catalogScope==='published'||String(c.sourceKind||'').startsWith('official_docs');
  add('Источник каталога',t(date?(published?'Опубликованная документация':'API провайдера'):'Не получен'));
  add('Дата снимка',date?when(date):t('Неизвестна'));
  add('Последняя попытка',c.attemptedAt?when(c.attemptedAt):t('Не выполнялась'));
