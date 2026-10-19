@@ -36,7 +36,7 @@ class ContextNativeBridgeTests(unittest.TestCase):
     def grant_fixture(self):
         root = Path(self.temp.name) / 'documents'
         root.mkdir()
-        (root / 'example.txt').write_text('Synthetic bounded file\n', encoding='utf-8')
+        (root / 'example.txt').write_bytes(b'Synthetic bounded file\n')
         (root / 'SKILL.md').write_text('---\nname: sample\ndescription: Synthetic skill\n---\n# Sample\n', encoding='utf-8')
         (root / 'credentials.json').write_text('Synthetic excluded content', encoding='utf-8')
         context = self.store.file_context
