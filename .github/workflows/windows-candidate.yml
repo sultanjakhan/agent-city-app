@@ -36,7 +36,7 @@ jobs:
         run: |
           python tools/verify_separation.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          foreach ($pattern in @('test_agent_hooks.py', 'test_task_connection_identity.py', 'test_task_sync.py', 'test_owner_transport.py', 'test_storage_lock.py', 'test_availability.py', 'test_batch_checks.py', 'test_key_rotation.py', 'test_separation_reviewed_assets.py')) {
+          foreach ($pattern in @('test_agent_hooks.py', 'test_task_connection_identity.py', 'test_task_sync.py', 'test_owner_transport.py', 'test_storage_lock.py', 'test_availability.py', 'test_batch_checks.py', 'test_key_rotation.py', 'test_separation_reviewed_assets.py', 'test_context_http_mcp.py', 'test_context_reconciliation.py', 'test_context_native_bridge.py', 'test_model_query.py', 'test_skill_inventory.py', 'test_agent_mcp.py')) {
             python -m unittest discover -s tests -p $pattern
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
@@ -72,6 +72,8 @@ jobs:
           if ($LASTEXITCODE) { throw 'Native pipe self-test failed' }
           & (Join-Path $receipt.candidate 'backend/AgentCityBackend.exe') --self-test
           if ($LASTEXITCODE) { throw 'Frozen backend self-test failed' }
+          & (Join-Path $receipt.candidate 'backend/AgentCityBackend.exe') --internal-script context_mcp.py --help
+          if ($LASTEXITCODE) { throw 'Frozen scoped context entry point unavailable' }
           "CANDIDATE_PATH=$($receipt.candidate)" >> $env:GITHUB_ENV
       - name: Retain QA candidate (unsigned, not an update release)
         uses: actions/upload-artifact@v4

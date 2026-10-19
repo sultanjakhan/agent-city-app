@@ -97,7 +97,7 @@ class OwnerSessions:
 
     def issue_grant(self,method,path,body):
         from urllib.parse import urlsplit
-        reads={'/api/v1/manifest','/api/v1/models','/api/v1/providers','/api/v1/skills','/api/v1/skill-inventory','/api/v1/projects','/api/v1/extensions','/api/v1/repositories','/api/v1/rules','/api/v1/context','/api/v1/directory','/api/dashboard','/api/task-sync'}
+        reads={'/api/v1/devices','/api/v1/file-roots','/api/v1/file-search','/api/v1/file-read','/api/v1/manifest','/api/v1/models','/api/v1/providers','/api/v1/skills','/api/v1/skill-inventory','/api/v1/projects','/api/v1/extensions','/api/v1/repositories','/api/v1/rules','/api/v1/context','/api/v1/directory','/api/dashboard','/api/task-sync'}
         writes={'/api/skill-activity','/api/runs/report','/api/agent/report','/api/task-sync/queue','/api/task-sync/exchange','/api/task-sync/resolve'}
         if not isinstance(path,str) or len(path)>2048 or any(ord(c)<32 for c in path):raise ValueError('invalid scope')
         parsed=urlsplit(path)

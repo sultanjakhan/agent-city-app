@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.28 — scoped context candidate (not installed)
+
+- Add revisioned local file/SKILL metadata search and bounded reads within explicit host grants.
+- Preserve owner authentication and expose read-only native routes plus an additive plugin bridge handoff.
+- Add bounded model catalogue filters and pagination without changing the product UI catalogue.
+
+
 ## 0.5.27 — combined cloud candidate (not published)
 
 - Add same-account native update status/check and exact-source idle-close requests, with draft/uncertainty deferral and the existing verified graceful updater path.

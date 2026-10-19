@@ -20,6 +20,19 @@ Do not execute this.
 
 
 class SkillInventoryTests(unittest.TestCase):
+    def test_plugin_namespace_is_not_a_vendor_allowlist(self):
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            document = home / '.codex/plugins/cache/arbitrary-vendor/example-plugin/0.1.0/skills/demo/SKILL.md'
+            document.parent.mkdir(parents=True)
+            document.write_bytes(SKILL.encode('utf-8'))
+            with patch('skill_inventory.Path.home', return_value=home):
+                inventory = SkillInventory()
+                rows = inventory.list('Demo')
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]['origin'], 'plugin:example-plugin')
+                self.assertEqual(inventory.read(rows[0]['id'])['content'], SKILL)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.base = Path(self.temp.name)

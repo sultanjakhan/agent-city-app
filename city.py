@@ -71,7 +71,7 @@ def main():
     if sys.argv[1:]==['--owner-delegated-stdin']:
         return delegated_stdin()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('resource', choices=['manifest', 'models', 'providers', 'skills', 'skill-inventory', 'projects', 'extensions', 'repositories', 'rules', 'context', 'report-use', 'directory', 'dashboard', 'report-run', 'codex-usage'])
+    parser.add_argument('resource', choices=['manifest', 'models', 'providers', 'skills', 'skill-inventory', 'projects', 'extensions', 'repositories', 'rules', 'context', 'report-use', 'directory', 'dashboard', 'report-run', 'codex-usage', 'devices', 'file-roots', 'file-search', 'file-read', 'grant-root', 'revoke-root'])
     parser.add_argument('--port', type=int, help='explicit legacy HTTP server; otherwise use the installed native pipe')
     parser.add_argument('--slug', help='read one skill, with the skills resource')
     parser.add_argument('--id', help='read an enumerated skill from skill-inventory')
@@ -82,7 +82,42 @@ def main():
     parser.add_argument('--file', type=Path, help='UTF-8 JSON report for report-run; no prompts, keys or task text')
     parser.add_argument('--codex-session', help='exact local Codex session UUID; with --codex-turn')
     parser.add_argument('--codex-turn', help='completed Codex turn UUID explicitly bound to this run')
+    parser.add_argument('--device-id')
+    parser.add_argument('--root-id')
+    parser.add_argument('--q')
+    parser.add_argument('--kind')
+    parser.add_argument('--extension')
+    parser.add_argument('--limit', type=int)
+    parser.add_argument('--offset', type=int)
+    parser.add_argument('--revision')
+    parser.add_argument('--start-line', type=int)
+    parser.add_argument('--end-line', type=int)
+    parser.add_argument('--max-bytes', type=int)
+    parser.add_argument('--byte-offset', type=int)
+    parser.add_argument('--provider')
+    parser.add_argument('--developer')
+    parser.add_argument('--price-verified', choices=['true', 'false'])
+    parser.add_argument('--path', type=Path, help='grant-root only; never sent through HTTP')
+    parser.add_argument('--data', type=Path, help='host-local grant configuration directory')
+    parser.add_argument('--label', default='Local documents')
+    parser.add_argument('--source', choices=['file', 'workspace', 'installed', 'plugin-cache'], default='file')
     args = parser.parse_args()
+    if args.resource in {'grant-root', 'revoke-root'}:
+        from file_context import FileContext, ContextError
+        if args.data is None or not args.data.is_absolute() or not args.data.is_dir():
+            parser.error('host grants require an existing absolute --data profile directory')
+        directory = args.data
+        if not args.revision or (args.resource == 'grant-root' and not args.path) or (args.resource == 'revoke-root' and not args.root_id):
+            parser.error('host grant mutation requires revision and path/root-id; read file-roots first')
+        try:
+            local = FileContext(directory)
+            result = local.grant(args.path, args.label, args.revision, args.source) if args.resource == 'grant-root' else local.revoke(args.root_id, args.revision)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return
+        except ContextError as exc:
+            parser.exit(1, exc.code + '\n')
+    if args.path or args.data:
+        parser.error('path/data are host grant configuration only')
     usage = None
     if args.resource == 'codex-usage' or args.codex_session or args.codex_turn:
         if args.resource not in {'codex-usage', 'report-run'}:
@@ -99,20 +134,26 @@ def main():
     if not 1 <= args.port <= 65535:
         parser.error('invalid local port')
     url = f'http://127.0.0.1:{args.port}/api/v1/{args.resource}'
+    fields = {k: v for k, v in {'deviceId': args.device_id, 'rootId': args.root_id, 'q': args.q, 'kind': args.kind,
+              'extension': args.extension, 'limit': args.limit, 'offset': args.offset, 'revision': args.revision,
+              'startLine': args.start_line, 'endLine': args.end_line, 'maxBytes': args.max_bytes, 'byteOffset': args.byte_offset,
+              'provider': args.provider, 'developer': args.developer, 'priceVerified': args.price_verified}.items() if v is not None}
     if args.slug:
         if args.resource != 'skills':
             parser.error('--slug requires the skills resource')
-        url += '?' + urlencode({'slug': args.slug})
+        fields['slug'] = args.slug
     if args.id and args.resource != 'report-use':
-        if args.resource not in {'skill-inventory', 'repositories'} or args.slug:
-            parser.error('--id requires skill-inventory without --slug')
-        url += '?' + urlencode({'id': args.id})
+        if args.resource not in {'skill-inventory', 'repositories', 'file-read'} or args.slug:
+            parser.error('--id requires skill-inventory, repositories or file-read without --slug')
+        fields['id'] = args.id
     if args.resource == 'context':
         if not args.cwd:
             parser.error('context requires --cwd')
-        url += '?' + urlencode({'cwd': args.cwd})
+        fields['cwd'] = args.cwd
     if args.resource == 'rules':
-        url += '?' + urlencode({'scope': args.scope})
+        fields['scope'] = args.scope
+    if fields:
+        url += '?' + urlencode(fields)
     if args.resource == 'report-use' and (not args.id or not args.event_id):
         parser.error('report-use requires --id and --event-id')
     if args.resource == 'report-run' and not args.file:

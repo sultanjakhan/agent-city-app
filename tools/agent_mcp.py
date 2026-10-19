@@ -111,6 +111,109 @@ REPORT['description'] = 'Observed cumulative snapshot. Unknown model/provider/us
 IDENTITY = {'type':'string', 'minLength':8, 'maxLength':100}
 
 
+# Standalone plugin bridge contract: no backend imports, host paths or grant mutations.
+CONTEXT_TOOLS = [{'name': 'agent_city_devices',
+  'description': 'List registered local devices; remote access is not inferred.',
+  'inputSchema': {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False}},
+ {'name': 'agent_city_file_roots',
+  'description': 'List host-configured root grants and their revision. Cannot grant access.',
+  'inputSchema': {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False}},
+ {'name': 'agent_city_file_search',
+  'description': 'Bounded metadata search inside one granted device/root. Content stays local.',
+  'inputSchema': {'type': 'object',
+                  'properties': {'deviceId': {'type': 'string', 'maxLength': 300},
+                                 'rootId': {'type': 'string', 'maxLength': 300},
+                                 'q': {'type': 'string', 'maxLength': 300},
+                                 'kind': {'type': 'string', 'enum': ['skill', 'text']},
+                                 'extension': {'type': 'string', 'maxLength': 300},
+                                 'limit': {'type': 'integer', 'minimum': 0},
+                                 'offset': {'type': 'integer', 'minimum': 0},
+                                 'revision': {'type': 'string', 'maxLength': 300}},
+                  'required': ['deviceId', 'rootId'],
+                  'additionalProperties': False}},
+ {'name': 'agent_city_skill_search',
+  'description': 'Find SKILL.md via the existing skill inventory metadata and explicit root grant.',
+  'inputSchema': {'type': 'object',
+                  'properties': {'deviceId': {'type': 'string', 'maxLength': 300},
+                                 'rootId': {'type': 'string', 'maxLength': 300},
+                                 'q': {'type': 'string', 'maxLength': 300},
+                                 'extension': {'type': 'string', 'maxLength': 300},
+                                 'limit': {'type': 'integer', 'minimum': 0},
+                                 'offset': {'type': 'integer', 'minimum': 0},
+                                 'revision': {'type': 'string', 'maxLength': 300}},
+                  'required': ['deviceId', 'rootId'],
+                  'additionalProperties': False}},
+ {'name': 'agent_city_file_read',
+  'description': 'Read UTF-8 text by enumerated opaque ID, with hash, line and byte bounds.',
+  'inputSchema': {'type': 'object',
+                  'properties': {'deviceId': {'type': 'string', 'maxLength': 300},
+                                 'rootId': {'type': 'string', 'maxLength': 300},
+                                 'id': {'type': 'string', 'maxLength': 300},
+                                 'revision': {'type': 'string', 'maxLength': 300},
+                                 'startLine': {'type': 'integer', 'minimum': 0},
+                                 'endLine': {'type': 'integer', 'minimum': 0},
+                                 'maxBytes': {'type': 'integer', 'minimum': 0},
+                                 'byteOffset': {'type': 'integer', 'minimum': 0}},
+                  'required': ['deviceId', 'rootId', 'id'],
+                  'additionalProperties': False}},
+ {'name': 'agent_city_read_skill',
+  'description': 'Extend SkillInventory.read(id) through its existing API, within a host root grant.',
+  'inputSchema': {'type': 'object',
+                  'properties': {'deviceId': {'type': 'string', 'maxLength': 300},
+                                 'rootId': {'type': 'string', 'maxLength': 300},
+                                 'id': {'type': 'string', 'maxLength': 300},
+                                 'revision': {'type': 'string', 'maxLength': 300},
+                                 'startLine': {'type': 'integer', 'minimum': 0},
+                                 'endLine': {'type': 'integer', 'minimum': 0},
+                                 'maxBytes': {'type': 'integer', 'minimum': 0},
+                                 'byteOffset': {'type': 'integer', 'minimum': 0}},
+                  'required': ['deviceId', 'rootId', 'id'],
+                  'additionalProperties': False}},
+ {'name': 'agent_city_models',
+  'description': 'Filter a bounded model catalogue page; separate price/auth/quota/inference evidence. No '
+                 'model launch.',
+  'inputSchema': {'type': 'object',
+                  'properties': {'q': {'type': 'string', 'maxLength': 300},
+                                 'provider': {'type': 'string', 'maxLength': 300},
+                                 'developer': {'type': 'string', 'maxLength': 300},
+                                 'kind': {'type': 'string', 'maxLength': 300},
+                                 'authStatus': {'type': 'string', 'maxLength': 300},
+                                 'responseStatus': {'type': 'string', 'maxLength': 300},
+                                 'revision': {'type': 'string', 'maxLength': 300},
+                                 'priceVerified': {'type': 'boolean'},
+                                 'tools': {'type': 'boolean'},
+                                 'vision': {'type': 'boolean'},
+                                 'limit': {'type': 'integer', 'minimum': 0},
+                                 'offset': {'type': 'integer', 'minimum': 0}},
+                  'required': [],
+                  'additionalProperties': False}}]
+
+
+def context_request(name, args):
+    definition = next((item for item in CONTEXT_TOOLS if item['name'] == name), None)
+    if definition is None or type(args) is not dict:
+        raise ValueError('unsupported_tool')
+    contract = definition['inputSchema']
+    if set(args) - set(contract['properties']) or set(contract['required']) - set(args):
+        raise ValueError('unsupported_tool_fields')
+    for key, value in args.items():
+        spec = contract['properties'][key]
+        if ((spec['type'] == 'string' and (type(value) is not str or len(value) > spec.get('maxLength', 300)))
+                or (spec['type'] == 'integer' and (type(value) is not int or value < spec.get('minimum', 0)))
+                or (spec['type'] == 'boolean' and type(value) is not bool)
+                or ('enum' in spec and value not in spec['enum'])):
+            raise ValueError('invalid_tool_arguments')
+    from urllib.parse import urlencode
+    routes = {'agent_city_devices': '/api/v1/devices', 'agent_city_file_roots': '/api/v1/file-roots',
+              'agent_city_file_search': '/api/v1/file-search', 'agent_city_skill_search': '/api/v1/file-search',
+              'agent_city_file_read': '/api/v1/file-read', 'agent_city_read_skill': '/api/v1/skill-inventory',
+              'agent_city_models': '/api/v1/models'}
+    values = dict(args)
+    if name == 'agent_city_skill_search': values['kind'] = 'skill'
+    values = {key: str(value).lower() if type(value) is bool else value for key, value in values.items()}
+    return {'method': 'GET', 'path': routes[name] + ('?' + urlencode(values) if values else ''), 'body': None}
+
+
 def tools_for(app):
     if app == 'cicada':
         return [
@@ -128,10 +231,12 @@ def tools_for(app):
         {'name':'agent_city_dashboard','description':'Read Cicada tasks and reported AI executions from the selected configured source.', 'inputSchema':schema({},[])},
         {'name':'agent_city_inventory','description':'Read enumerated skills, models or providers. Catalogue membership does not prove availability.', 'inputSchema':schema({'kind':{'type':'string','enum':['skill-inventory','models','providers']}},['kind'])},
         {'name':'agent_city_report_run','description':'Record an observed executor report with the exact native Cicada binding. No task completion or model launch.', 'inputSchema':schema({'binding':{'type':'object'},'report':REPORT},['binding','report'])},
-        {'name':'agent_city_report_skill_use','description':'Record one actual skill use; eventId deduplicates retries.', 'inputSchema':schema({'id':TEXT,'agent':{'type':'string','enum':['codex','claude','other']},'eventId':IDENTITY},['id','agent','eventId'])}]
+        {'name':'agent_city_report_skill_use','description':'Record one actual skill use; eventId deduplicates retries.', 'inputSchema':schema({'id':TEXT,'agent':{'type':'string','enum':['codex','claude','other']},'eventId':IDENTITY},['id','agent','eventId'])}] + copy.deepcopy(CONTEXT_TOOLS)
 
 
 def invoke(app, bridge, name, args):
+    if app == 'agent-city' and any(item['name'] == name for item in CONTEXT_TOOLS):
+        return bridge.call(context_request(name, args))
     definition = next((item for item in tools_for(app) if item['name'] == name), None)
     if not definition or type(args) is not dict: raise ValueError('unsupported tool')
     contract = definition['inputSchema']
