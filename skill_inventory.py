@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 import re
 import threading
+from datetime import datetime, timezone
+from text_reader import read_text, slice_text
 from typing import Iterable
 
 
@@ -84,20 +86,29 @@ def default_roots(worktree_root: str | os.PathLike[str] | None = None) -> list[t
         ("codex", home / ".codex" / "skills" / ".system"),
         ("agents", home / ".agents" / "skills"),
     ]
-    # Plugin cache is a known, bounded namespace.  Only its versioned `skills`
-    # directories are accepted; no general filesystem search is performed.
+    # Bounded discovery inside the already configured plugin cache, independent
+    # of vendor names. No reparse node is followed at any level.
     cache = home / ".codex" / "plugins" / "cache"
-    for namespace in ("openai-bundled", "openai-curated-remote", "openai-primary-runtime"):
-        namespace_root = cache / namespace
+    def children(path, limit):
+        try:
+            return sorted((p for p in path.iterdir() if p.is_dir() and not p.name.startswith('.') and not _reparse(p)),
+                          key=lambda p: p.name.casefold(), reverse=True)[:limit]
+        except OSError:
+            return []
+    if not cache.is_dir() or _reparse(cache):
+        return roots
+    for namespace_root in children(cache, 32):
         if not namespace_root.is_dir() or _reparse(namespace_root):
             continue
-        for plugin in namespace_root.iterdir():
+        for plugin in children(namespace_root, 64):
             if not plugin.is_dir() or _reparse(plugin):
                 continue
-            for version in plugin.iterdir():
+            for version in children(plugin, 8):
                 candidate = version / "skills"
                 if version.is_dir() and not _reparse(version) and candidate.is_dir() and not _reparse(candidate):
                     roots.append((f"plugin:{plugin.name}", candidate))
+                    if len(roots) >= 256:
+                        return roots
     return roots
 
 
@@ -192,7 +203,27 @@ class SkillInventory:
             self._entries = entries
             return [{key: value for key, value in item.items() if not key.startswith('_')} for item in result]
 
-    def read(self, opaque_id: str) -> dict[str, object]:
+    def enumerate_document(self, path: Path) -> str:
+        """Adopt a file already discovered under this inventory's fixed roots."""
+        path = Path(path)
+        resolved = path.resolve(strict=True)
+        root = next((r.resolve() for _, r in self._roots if resolved.is_relative_to(r.resolve())), None)
+        if root is None or path.name != 'SKILL.md' or _reparse(path):
+            raise SkillInventoryError('skill is outside configured roots')
+        current = root
+        for part in resolved.relative_to(root).parts:
+            current /= part
+            if _reparse(current):
+                raise SkillInventoryError('skill alias denied')
+        _, content, _ = read_text(path, root, self.max_size)
+        name, description = _metadata(content)
+        ident = 'skill-' + hashlib.sha256(str(resolved).encode('utf-8')).hexdigest()[:24]
+        with self._lock:
+            self._entries[ident] = {'id': ident, 'name': name, 'slug': path.parent.name, 'description': description,
+                                   'origin': self._roots[0][0], 'path': str(path.absolute()), '_resolvedPath': str(resolved), 'editable': False}
+        return ident
+
+    def read(self, opaque_id: str, *, start_line=1, end_line=None, max_bytes=None, revision=None, byte_offset=0) -> dict[str, object]:
         with self._lock:
             entry = self._entries.get(opaque_id)
             if entry is None:
@@ -208,14 +239,23 @@ class SkillInventory:
                     raise SkillInventoryError("skill is no longer readable")
                 if path.stat().st_size > self.max_size:
                     raise SkillInventoryError("skill is no longer readable")
-                with path.open("rb") as stream:
-                    raw = stream.read(self.max_size + 1)
-                if len(raw) > self.max_size:
-                    raise SkillInventoryError("skill is no longer readable")
-                content = raw.decode("utf-8")
+                raw, content, stat = read_text(path, resolved.parent, self.max_size)
                 _metadata(content)
+                current_revision = hashlib.sha256(raw).hexdigest()
+                if revision is not None and revision != current_revision:
+                    raise SkillInventoryError('skill changed; revision=' + current_revision)
                 result = {key: value for key, value in entry.items() if not key.startswith("_")}
-                result["content"] = content
+                result.update(revision=current_revision, hash=current_revision, size=stat.st_size, mtimeNs=stat.st_mtime_ns,
+                              readAt=datetime.now(timezone.utc).isoformat())
+                if max_bytes is not None or end_line is not None:
+                    if (type(start_line) is not int or start_line < 1 or type(end_line) is not int
+                            or not start_line <= end_line < start_line + 200 or type(max_bytes) is not int or not 1 <= max_bytes <= 32768):
+                        raise SkillInventoryError('invalid range')
+                    if type(byte_offset) is not int or byte_offset < 0:
+                        raise SkillInventoryError('invalid byte offset')
+                    result.update(slice_text(content, start_line, end_line, max_bytes, byte_offset))
+                    content = result['content']
+                result['content'] = content
                 return result
             except SkillInventoryError:
                 raise

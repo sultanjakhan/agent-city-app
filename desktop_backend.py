@@ -27,6 +27,9 @@ def main():
         if script == "city.py":
             import city
             return city.main()
+        if script == "context_mcp.py":
+            import context_mcp
+            return context_mcp.main()
         return 2
     import desktop_bridge
     return desktop_bridge.main(sys.argv[1:])

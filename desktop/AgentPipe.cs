@@ -40,7 +40,7 @@ internal sealed class AgentPipe : IDisposable
         if (path.Length > 2048 || path.Any(c => c < 32) || !path.StartsWith('/') || path.StartsWith("//") || path.Contains('#'))
             throw new InvalidDataException();
         var route = path.Split('?')[0];
-        string[] reads = { "/api/v1/manifest", "/api/v1/models", "/api/v1/providers", "/api/v1/skills",
+        string[] reads = { "/api/v1/devices", "/api/v1/file-roots", "/api/v1/file-search", "/api/v1/file-read", "/api/v1/manifest", "/api/v1/models", "/api/v1/providers", "/api/v1/skills",
             "/api/v1/skill-inventory", "/api/v1/projects", "/api/v1/extensions", "/api/v1/repositories",
             "/api/v1/rules", "/api/v1/context", "/api/v1/directory", "/api/dashboard", "/api/task-sync" };
         if (path == "/api/desktop/update-status" && method == "GET" && value.GetProperty("body").ValueKind == JsonValueKind.Null) return value.Clone();
@@ -145,6 +145,21 @@ internal sealed class AgentPipe : IDisposable
         using var duplicate = JsonDocument.Parse(await Call(name, Utf8.GetBytes("{\"method\":\"GET\",\"method\":\"POST\",\"path\":\"/api/state\",\"body\":null}")));
         var passed = accepted.RootElement.GetProperty("ok").GetBoolean() && !rejected.RootElement.GetProperty("ok").GetBoolean() &&
             !duplicate.RootElement.GetProperty("ok").GetBoolean() && count == 1;
+        foreach (var route in new[] { "/api/v1/devices", "/api/v1/file-roots", "/api/v1/file-search?deviceId=synthetic&rootId=synthetic", "/api/v1/file-read?deviceId=synthetic&rootId=synthetic&id=synthetic" })
+        {
+            var request = JsonSerializer.SerializeToUtf8Bytes(new { method = "GET", path = route, body = (object?)null });
+            using var response = JsonDocument.Parse(await Call(name, request));
+            passed &= response.RootElement.GetProperty("ok").GetBoolean();
+        }
+        foreach (var route in new[] { "/api/v1/grant-root", "/api/v1/revoke-root", "/api/v1/file-read/../../state" })
+        {
+            var request = JsonSerializer.SerializeToUtf8Bytes(new { method = "GET", path = route, body = (object?)null });
+            using var response = JsonDocument.Parse(await Call(name, request));
+            passed &= !response.RootElement.GetProperty("ok").GetBoolean();
+        }
+        using (var response = JsonDocument.Parse(await Call(name, Utf8.GetBytes("{\"method\":\"POST\",\"path\":\"/api/v1/file-read\",\"body\":{}}"))))
+            passed &= !response.RootElement.GetProperty("ok").GetBoolean();
+        passed &= count == 5;
         await Write(Console.OpenStandardOutput(), JsonSerializer.SerializeToUtf8Bytes(new { agentPipeSelfTest = passed, currentUserOnly = true, appStarted = false }), CancellationToken.None);
         return passed ? 0 : 2;
     }

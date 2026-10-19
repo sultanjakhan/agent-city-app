@@ -41,6 +41,8 @@ from data_sources import DataSources, SourceError, SourceConflict, validate_mani
 from local_mode import LocalOnlyCloud
 import catalog_directory
 import public_api
+from file_context import FileContext, ContextError, params as context_params
+from model_query import page_models, http_params as model_params
 import availability
 from skill_inventory import SkillInventory, SkillInventoryError
 from project_library import ProjectLibrary, ProjectLibraryError, ProjectRevisionConflict
@@ -366,6 +368,7 @@ class Store:
         self.projects = ProjectLibrary(self.directory / 'projects.json', seed_path=ROOT / 'data/projects.json')
         self.repos = RepoInventory(repo_roots if repo_roots is not None else [self.directory] if skills_root else storage.repository_roots)
         self.pipelines = PipelineStore(self.directory)
+        self.file_context = FileContext(self.directory, self.inventory, self.repos, self.skills)
         self.rules = RulesStore(self.directory, self.repos)
         self.repo_profiles = RepoProfiles(self.directory, self.repos, self.projects)
         self.activity = SkillActivity(self.directory)
@@ -856,6 +859,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, self.server.store.projects.snapshot())
             except (ProjectLibraryError, OSError):
                 return self.respond(400, {'error': 'Не удалось прочитать библиотеку проектов.'})
+        if path in {'/api/v1/devices', '/api/v1/file-roots', '/api/v1/file-search', '/api/v1/file-read'} or (path in {'/api/skill-inventory', '/api/v1/skill-inventory'} and set(parse_qs(urlsplit(self.path).query, keep_blank_values=True)) & {'deviceId', 'rootId'}):
+            context = self.server.store.file_context
+            try:
+                query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                if path.endswith('/devices') or path.endswith('/file-roots'):
+                    context_params(query, set())
+                    return self.respond(200, context.devices() if path.endswith('/devices') else context.roots())
+                reading = path.endswith('/file-read') or path in {'/api/skill-inventory', '/api/v1/skill-inventory'}
+                allowed = {'deviceId', 'rootId', 'id', 'revision', 'startLine', 'endLine', 'maxBytes', 'byteOffset'} if reading else {'deviceId', 'rootId', 'q', 'kind', 'extension', 'limit', 'offset', 'revision'}
+                values = context_params(query, allowed)
+                return self.respond(200, context.read(values, skill_only=path in {'/api/skill-inventory', '/api/v1/skill-inventory'}) if reading else context.search(values))
+            except ContextError as exc:
+                return self.respond(exc.status, {'schemaVersion': 1, 'error': exc.code, **exc.details})
+            except (OSError, ValueError):
+                return self.respond(503, {'error': 'context_unavailable'})
         if path in {'/api/skill-inventory', '/api/v1/skill-inventory'}:
             params = parse_qs(urlsplit(self.path).query)
             try:
@@ -918,7 +936,12 @@ class Handler(BaseHTTPRequestHandler):
             if resource == 'manifest':
                 return self.respond(200, public_api.manifest())
             if resource == 'models':
-                return self.respond(200, public_api.models(snapshot))
+                try:
+                    return self.respond(200, page_models(snapshot, model_params(parse_qs(urlsplit(self.path).query, keep_blank_values=True))))
+                except ValueError as exc:
+                    if str(exc) == 'stale revision':
+                        return self.respond(409, {'error': 'catalog_changed', 'revision': page_models(snapshot)['revision']})
+                    return self.respond(400, {'error': 'invalid_model_query'})
             if resource == 'providers':
                 return self.respond(200, public_api.providers(snapshot))
             if resource == 'directory':
