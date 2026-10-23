@@ -31,10 +31,10 @@
    const eligible=nonCompleted&&(task.isActive===true||live.length>0||running.length>0);
    const known=live.length>0&&observed.source?.status==='fresh';
    const projectIds=[...new Set(linked.map(s=>s.projectId))];
-   return {...task,isActive:sameSource&&task.present!==false?task.isActive:null,oldSource:!sameSource,attention,eligible,requests,linked,live,reports:exactReports,
+   return {...task,observedNow:now(),isActive:sameSource&&task.present!==false?task.isActive:null,oldSource:!sameSource,attention,eligible,requests,linked,live,reports:exactReports,
     projectNames:projectIds.map(id=>observed.projects?.find(p=>p.id===id)?.name).filter(Boolean),
     sessionCount:known?live.length:null,agentCount:known&&live.every(s=>string(s.agentId))?new Set(live.map(s=>s.agentId)).size:null,
-    observationStatus:observed.source?.status||'unknown',requestOld:requests.some(r=>!fresh(r,now())),stale:status!=='complete'||task.present===false};
+    agentNames:Object.fromEntries((observed.agents||[]).map(a=>[a.id,a.name])),observationStatus:observed.source?.status||'unknown',requestOld:requests.some(r=>!fresh(r,now())),stale:status!=='complete'||task.present===false};
   }
   return {
    update(snapshot,error=null){
@@ -61,7 +61,7 @@
      if(pinned&&pinned!==namespace)continue;
      const task=[...next.values(),...previous.values()].find(t=>r.taskKey===t.identity.taskKey&&reportAllowed(r,t));if(!task)continue;
      runSources.set(runKey,namespace);const old=reports.get(runKey);
-     if(!old||r.sequence>old.sequence)reports.set(runKey,{runId:r.runId,originDevice:r.originDevice||null,taskKey:r.taskKey,sequence:r.sequence,status:r.status,reasonCode:string(r.reasonCode),stage:string(r.stage),updatedAt:stamp(r.updatedAt)===null?null:r.updatedAt,source:r.source?Object.fromEntries(['profile','sourceKey','sourceNamespace'].map(k=>[k,r.source[k]])):null});
+     if(!old||r.sequence>old.sequence)reports.set(runKey,{runId:r.runId,originDevice:r.originDevice||null,taskKey:r.taskKey,sequence:r.sequence,status:r.status,reasonCode:string(r.reasonCode),stage:string(r.stage),context:string(r.result?.summary),updatedAt:stamp(r.updatedAt)===null?null:r.updatedAt,source:r.source?Object.fromEntries(['profile','sourceKey','sourceNamespace'].map(k=>[k,r.source[k]])):null});
     }
     // Omission never resolves a recorded explicit request. Partial snapshots also
     // retain prior rows, marked as not present; a newer terminal report clears it.
@@ -76,6 +76,8 @@
    get source(){return {status,readAt,asOf,label:source?.label||'Cicada',identity:source};}
   };
  }
+ const executionState=status=>({working:'Работает',waiting:'Ожидает',blocked:'Заблокировано',completed:'Выполнение завершено',interrupted:'Прервано'}[status]||'Состояние неизвестно');
+ const basis=task=>task.live.length?'Наблюдаемое выполнение':task.reports.some(r=>fresh(r,task.observedNow)&&['running','waiting'].includes(r.status))?'Исполнитель: '+(task.reports.some(r=>fresh(r,task.observedNow)&&r.status==='running')?'работает':'ожидает'):task.isActive===true?'Таймер Cicada идёт':'Последние данные';
  const requestLabel=r=>r.reasonCode==='approval'?'Нужно ваше подтверждение':'Нужен ваш ответ';
  function summary(task){
   const timer=task.isActive===true?'Таймер Cicada идёт':task.isActive===false?'Таймер Cicada не идёт':'Таймер Cicada неизвестен';
@@ -96,16 +98,16 @@
    if(attention.length)sections.push({id:'section:attention',heading:'Нужно ваше участие'},...attention);
    sections.push({id:'section:work',heading:'Текущая работа'},...work);
    list(items,sections,t=>t.id,t=>{if(t.heading)return node('h3','ow-task-section');const n=button('',()=>select(t.id),'ow-session ow-task-row'),title=node('span','ow-session-title'),meta=node('span','ow-secondary'),status=node('span','ow-status');n.append(title,status,meta);n._title=title;n._meta=meta;n._status=status;return n;},(n,t)=>{
-    if(t.heading){put(n,t.heading);return;}put(n._title,t.title);put(n._status,t.attention?[...new Set(t.requests.map(requestLabel))].join(' · ')+(t.stale?' · источник требует проверки':t.requestOld?' · давний отчёт':''):t.stale?'Последние известные данные':'Cicada');
-    put(n._meta,[...t.projectNames,summary(t),t.sessionCount===null?'Число активных сессий неизвестно':'Наблюдаемых сессий: '+t.sessionCount+(t.agentCount===null?'':' · агентов: '+t.agentCount)].join(' · '));n.setAttribute('aria-pressed',String(t.id===selected));
+    if(t.heading){put(n,t.heading);return;}put(n._title,t.title);put(n._status,t.attention?[...new Set(t.requests.map(requestLabel))].join(' · '):basis(t));
+    put(n._meta,[...t.projectNames,t.stage,t.sessionCount===null?null:'Сессий: '+t.sessionCount+(t.agentCount===null?'':' · агентов: '+t.agentCount)].filter(Boolean).join(' · '));n.setAttribute('aria-pressed',String(t.id===selected));
    });
    const sourceState=model.source.status;put(empty,sourceState==='complete'?'Текущая работа не подтверждена.':sourceState==='partial'?'Список Cicada неполный.':sourceState==='disconnected'?'Cicada не подключена.':'Текущая работа Cicada не проверена.');empty.hidden=rows.length>0;
    layout.classList.toggle('ow-detail-selected',!!selected&&!sessionOpen);detail.hidden=!selected||sessionOpen;const task=model.get(selected);if(!task)return;
-   put(heading,task.title);put(state,task.completed===true?'Завершена в Cicada':summary(task));put(notice,task.oldSource?'Выбрана задача прежнего источника. Текущее состояние недоступно.':task.present===false?'Задача отсутствует в текущем снимке.':!task.eligible&&!task.attention?'Сейчас не подтверждена как текущая.':task.stale?'Последние известные данные.':'');notice.hidden=!notice.textContent;
-   list(requestList,task.requests,r=>JSON.stringify([r.originDevice,r.runId]),()=>node('li'),(n,r)=>put(n,requestLabel(r)+(task.requestOld?' · давность отчёта требует проверки':'')+' · '+(r.updatedAt?new Date(r.updatedAt).toLocaleString('ru-RU'):'Время отчёта неизвестно')));
-   list(linked,task.linked,s=>s.id,s=>button('',()=>onOpenSession(s.id),'ow-session ow-task-execution'),(n,s)=>put(n,(s.name||s.id)+' · '+s.id));
+   put(heading,task.title);put(state,(task.completed===true?'Завершена в Cicada':summary(task))+(task.sessionCount===null?' · Число активных сессий неизвестно':' · Наблюдаемых сессий: '+task.sessionCount));put(notice,task.oldSource?'Выбрана задача прежнего источника. Текущее состояние недоступно.':task.present===false?'Задача отсутствует в текущем снимке.':!task.eligible&&!task.attention?'Сейчас не подтверждена как текущая.':task.stale?'Последние известные данные.':'');notice.hidden=!notice.textContent;
+   list(requestList,task.requests,r=>JSON.stringify([r.originDevice,r.runId]),()=>node('li'),(n,r)=>put(n,requestLabel(r)+(task.requestOld?' · давность отчёта требует проверки':'')+' · '+(r.updatedAt?new Date(r.updatedAt).toLocaleString('ru-RU'):'Время отчёта неизвестно')+(r.context||r.stage?' · Сообщённый контекст: '+(r.context||r.stage):'')));
+   list(linked,task.linked,s=>s.id,s=>button('',()=>onOpenSession(s.id),'ow-session ow-task-execution'),(n,s)=>put(n,[task.agentNames[s.agentId],s.name||'Сессия',executionState(s.status)].filter(Boolean).join(' · ')));
    put(linkedEmpty,task.linked.length?'':'Сессии не привязаны.');linkedEmpty.hidden=task.linked.length>0;
-   facts(sourceFacts,[...Object.entries(task.identity),['Процесс Cicada',task.process],['Источник',task.sourceLabel||model.source.label],['Состояние источника',task.oldSource?'Прежний источник':sourceState],['Последнее чтение',task.sourceReadAt]]);
+   facts(sourceFacts,[...Object.entries(task.identity),['Связанные наблюдения',task.linked.map(s=>s.id).join(' · ')||null],['Процесс Cicada',task.process],['Источник',task.sourceLabel||model.source.label],['Состояние источника',task.oldSource?'Прежний источник':sourceState],['Последнее чтение',task.sourceReadAt]]);
   }
   patch();return {model,update(snapshot,error){model.update(snapshot,error);patch();},observe(data){model.observe(data);patch();},get selected(){return selected;},
    source(){const s=model.source;return {label:s.label+' · '+({complete:'прочитано',partial:'неполный снимок',stale:'данные устарели',disconnected:'не подключена',unknown:'не проверено'}[s.status]),detail:'Cicada: '+s.status+' · чтение: '+(s.readAt||'неизвестно'),readAt:s.readAt};},

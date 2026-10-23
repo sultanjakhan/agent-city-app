@@ -37,7 +37,7 @@ waiting reports with user_input/approval request attention; those requests do no
 expire with heartbeat age. A newer terminal report resolves them. Ordinary
 waiting, errors and failed verification do not imply a request for a person.
 Source changes isolate report namespaces; open old-source selections retain
-explicit old-source facts without current timer claims. Counts stay unknown
+explicit old-source facts without current timer claims. Rows show only available project/stage, known observed counts and one meaningful timer/executor basis. Unknown-field explanations stay in details. Linked executions use supplied agent/session labels and recorded state; opaque IDs stay in source facts. Explicit requests may include plainly labelled reported result summary or stage, always as text without actionable reference URLs. Counts stay unknown
 without explicit linked current observations. There are no portfolio metrics,
 question fabrication, result URL actions, or task mutation controls.
 
