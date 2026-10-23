@@ -53,7 +53,7 @@
  const number=v=>count(v)===null?'Неизвестно':new Intl.NumberFormat('ru-RU').format(v);
  function duration(ms){if(count(ms)===null)return 'Неизвестно';const seconds=Math.floor(ms/1000);return seconds<60?seconds+' с':Math.floor(seconds/60)+' мин '+seconds%60+' с';}
  function timing(row,now){
-  if(count(row.durationMs)!==null)return {value:row.durationMs,note:row.durationSource==='derived-from-observed-turn-bounds'?'По наблюдаемым границам':'Длительность из источника'};
+  if(count(row.durationMs)!==null)return {value:row.durationMs,note:row.durationSource==='derived-from-observed-turn-bounds'?'По наблюдаемым границам':''};
   const start=Date.parse(row.startedAt||'');
   if(row.status==='working'&&!row.endedAt&&Number.isFinite(start)&&start<=now)return {value:Math.floor(now-start),note:'С начала наблюдения · идёт сейчас, не завершённая длительность'};
   return {value:null,note:'Длительность неизвестна'};
@@ -80,7 +80,7 @@
   filter.setAttribute('aria-label','Проект');filter.addEventListener('change',()=>navigate({...model.route,projectId:filter.value||null,agentId:null,sessionId:null}));
   const rows=node('div','ow-rows'),empty=node('p','ow-empty');
   projectArea.append(agents,edges,projectHistory);main.append(heading,filter,projectArea,rows,empty);
-  const detail=node('section','ow-detail'),crumb=node('nav','ow-breadcrumb'),detailTitle=node('h3'),detailStatus=node('p','ow-secondary'),unavailable=node('p','ow-empty','Выбранное наблюдение недоступно в этом снимке.'),summary=node('dl','ow-metrics'),start=node('p','ow-secondary');
+  const detail=node('section','ow-detail'),crumb=node('nav','ow-breadcrumb'),detailTitle=node('h3','ow-detail-title'),detailStatus=node('p','ow-secondary'),unavailable=node('p','ow-empty','Выбранное наблюдение недоступно в этом снимке.'),summary=node('dl','ow-metrics'),start=node('p','ow-secondary');
   crumb.setAttribute('aria-label','Путь к сессии');
   const crumbs={};for(const k of ['project','agent','session']){const n=button('',()=>{const s=model.selected;if(!s)return;if(k==='project')navigate({page:'projects',projectId:s.projectId});if(k==='agent')navigate({page:'projects',projectId:s.projectId,agentId:s.agentId});},'ow-crumb');crumbs[k]=n;crumb.append(n);}crumbs.session.disabled=true;
   const metricNodes={};for(const k of ['time','tokens','model']){const n=node('div'),label=node('dt'),value=node('dd'),note=node('p','ow-secondary');n.append(label,value,note);summary.append(n);metricNodes[k]={label,value,note};}
@@ -127,9 +127,9 @@
    const r=model.route,s=model.selected;layout.classList.toggle('ow-detail-selected',Boolean(r.sessionId));detail.hidden=!r.sessionId;unavailable.hidden=!!s;detailsBody.hidden=!s;crumb.hidden=!s;if(!s)return;
    if(selectedId!==s.id){remember();selectedId=s.id;const saved=sessionState.get(s.id)||{};tab=saved.tab||'activity';usage.node.open=!!saved.usage;identity.node.open=!!saved.identity;diagnostics.node.open=!!saved.diagnostics;}
    const project=model.data.projects.find(p=>p.id===s.projectId),agent=model.data.agents.find(a=>a.id===s.agentId);
-   put(crumbs.project,project?.name||'Проект неизвестен');put(crumbs.agent,agent?.name||'Агент неизвестен');crumbs.agent.disabled=!s.agentId;put(crumbs.session,s.scope.kind==='turn'?'Текущий ход':'Сессия');
+   put(crumbs.project,project?.name||'Проект неизвестен');put(crumbs.agent,agent?.name||'Агент неизвестен');crumbs.agent.disabled=!s.agentId;put(crumbs.session,s.scope.kind==='turn'?'Выполнение':'Сессия');
    put(detailTitle,s.task?.title||s.name);put(detailStatus,executionLabel(s)+' · '+({complete:'Полное наблюдение',partial:'Частичное наблюдение',unknown:'Полнота неизвестна'}[s.coverage]));
-   const t=timing(s,now());put(metricNodes.time.label,'Время');put(metricNodes.time.value,duration(t.value));put(metricNodes.time.note,t.note);
+   const t=timing(s,now());put(metricNodes.time.label,'Время');put(metricNodes.time.value,duration(t.value));put(metricNodes.time.note,t.note);metricNodes.time.note.hidden=!t.note;
    put(metricNodes.tokens.label,'Токены');put(metricNodes.tokens.value,number(s.usage.total));put(metricNodes.tokens.note,s.scope.kind==='turn'?'За выполнение':s.scope.kind==='session'?'За сессию':'За явный интервал');
    put(metricNodes.model.label,'Модель');put(metricNodes.model.value,s.model||'Неизвестно');put(metricNodes.model.note,s.effort?'Усилие · '+s.effort:'Усилие неизвестно');
    put(start,s.startedAt?'Начало · '+new Date(s.startedAt).toLocaleString('ru-RU'):'Начало неизвестно');

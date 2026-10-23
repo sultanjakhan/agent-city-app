@@ -9,17 +9,26 @@ from pathlib import Path
 MARKER = '/* Agent City observed-work bundle v1 */'
 BOOT = """
 (function(){
- let installed=false;
+ let installed=false,installing=false,ready=document.readyState!=='loading';
+ const observer=new MutationObserver(initialize);
  function initialize(){
-  if(installed||document.documentElement.dataset.agentCityMode!=='passive_dashboard')return;
-  installed=true;
-  const controller=globalThis.AgentCityObservedHost.install();
-  globalThis.AgentCityObservedController=controller;
-  queueMicrotask(()=>{if(typeof globalThis.render==='function')globalThis.render();});
+  if(installed||installing||!ready||document.documentElement.dataset.agentCityMode!=='passive_dashboard')return;
+  installing=true;
+  try{
+   const controller=globalThis.AgentCityObservedHost.install();
+   globalThis.AgentCityObservedController=controller;
+   installed=true;
+   observer.disconnect();
+   window.removeEventListener('agentcity:live-summary',initialize);
+   document.removeEventListener('DOMContentLoaded',domReady);
+   queueMicrotask(()=>{if(typeof globalThis.render==='function')globalThis.render();});
+  }finally{installing=false;}
  }
+ function domReady(){ready=true;initialize();}
+ observer.observe(document.documentElement,{attributes:true,attributeFilter:['data-agent-city-mode']});
  window.addEventListener('agentcity:live-summary',initialize);
- if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialize,{once:true});
- else initialize();
+ if(!ready)document.addEventListener('DOMContentLoaded',domReady,{once:true});
+ initialize();
 })();
 """
 

@@ -57,7 +57,7 @@ test('actual assembled bundle boots once in passive host and never fetches a new
  const bundle=execFileSync('python',['-c','from compat.observed_frontend import bundle; from pathlib import Path; print(bundle(Path.cwd()))'],{cwd:require('node:path').join(__dirname,'..'),encoding:'utf8',env:{...process.env,PYTHONIOENCODING:'utf-8'}});
  const doc=D.document(),nav=doc.createElement('nav'),aside=doc.createElement('aside');aside.className='app-header';aside.append(nav);doc.body.append(aside);doc.querySelector=s=>s==='.app-header nav'?nav:doc.documentElement.querySelector(s);
  for(const id of ['live-sessions-view','dashboard-view','page-title']){const n=doc.createElement('section');n.id=id;doc.body.append(n);}doc.documentElement.dataset.agentCityMode='passive_dashboard';doc.readyState='complete';
- const listeners={},queue=[],scope={document:doc,URLSearchParams,Intl,Date,queueMicrotask:fn=>queue.push(fn),fetch:()=>{throw Error('unexpected transport');},addEventListener:(key,fn)=>{(listeners[key]??=[]).push(fn);},removeEventListener(){},LiveSessions:{viewChanged(){},getSnapshot:()=>({projects:[],agents:[],sessions:[],source:{status:'partial'}}),refresh:async()=>null,openProject(){},openSession(){}},renderDashboard(){}};
+ const listeners={},queue=[],scope={MutationObserver:class{observe(){}disconnect(){}},document:doc,URLSearchParams,Intl,Date,queueMicrotask:fn=>queue.push(fn),fetch:()=>{throw Error('unexpected transport');},addEventListener:(key,fn)=>{(listeners[key]??=[]).push(fn);},removeEventListener(){},LiveSessions:{viewChanged(){},getSnapshot:()=>({projects:[],agents:[],sessions:[],source:{status:'partial'}}),refresh:async()=>null,openProject(){},openSession(){}},renderDashboard(){}};
  scope.window=scope;scope.render=()=>{scope.LiveSessions.viewChanged(true,'dashboard');scope.renderDashboard();};scope.setView=page=>scope.LiveSessions.viewChanged(true,page);
  vm.runInNewContext(bundle,scope);assert.ok(scope.AgentCityObservedController);for(const fn of queue)fn();
  assert.equal(doc.querySelectorAll('.observed-work').length,1);assert.equal(doc.getElementById('observed-work-view').hidden,false);assert.equal(doc.getElementById('dashboard-view').hidden,true);
@@ -114,4 +114,41 @@ test('return after selected execution completes retains Home rather than navigat
 });
 test('Projects landing uses the single project-selection instruction',()=>{
  const h=setup();h.ui.navigate({page:'projects'});for(const status of ['partial','fresh','unavailable']){h.ui.update({...feed([]),source:{status}});assert.equal(by(h.root,'ow-empty').textContent,'Выберите проект.');}
+});
+
+
+test('boot observes only passive mode, installs once for either DOM/mode ordering, and preserves secondary page without collector fetch',()=>{
+ const {execFileSync}=require('node:child_process'),vm=require('node:vm');
+ const bundle=execFileSync('python',['-c','from compat.observed_frontend import bundle; from pathlib import Path; print(bundle(Path.cwd()))'],{cwd:require('node:path').join(__dirname,'..'),encoding:'utf8',env:{...process.env,PYTHONIOENCODING:'utf-8'}});
+ for(const ordering of ['dom-then-mode','mode-then-dom','both-ready','dom-ready-mode-later']){
+  const doc=D.document(),nav=doc.createElement('nav'),aside=doc.createElement('aside');aside.className='app-header';aside.append(nav);doc.body.append(aside);doc.querySelector=s=>s==='.app-header nav'?nav:doc.documentElement.querySelector(s);
+  for(const id of ['live-sessions-view','dashboard-view','page-title','catalog-view']){const n=doc.createElement('section');n.id=id;doc.body.append(n);}
+  doc.getElementById('catalog-view').hidden=false;doc.getElementById('page-title').textContent='Модели';
+  const models=doc.createElement('button');models.dataset.view='models';models.className='active';nav.append(models);
+  const initiallyReady=ordering==='both-ready'||ordering==='dom-ready-mode-later';doc.readyState=initiallyReady?'complete':'loading';if(ordering==='both-ready')doc.documentElement.dataset.agentCityMode='passive_dashboard';
+  const listeners={},queue=[],observers=[];let refreshes=0,renders=0,navigations=0;
+  class Observer{constructor(cb){this.cb=cb;this.disconnected=false;observers.push(this);}observe(target,options){this.target=target;this.options=options;}disconnect(){this.disconnected=true;}}
+  const scope={MutationObserver:Observer,document:doc,URLSearchParams,Intl,Date,queueMicrotask:fn=>queue.push(fn),fetch:()=>{throw Error('unexpected collector/transport request');},addEventListener:(key,fn)=>{(listeners[key]??=[]).push(fn);},removeEventListener:(key,fn)=>{listeners[key]=(listeners[key]||[]).filter(x=>x!==fn);},LiveSessions:{viewChanged(show){assert.equal(show,false);},getSnapshot:()=>null,refresh:async()=>{refreshes++;},openProject(){},openSession(){}},renderDashboard(){}};
+  scope.window=scope;scope.render=()=>{renders++;scope.LiveSessions.viewChanged(false,'models');};scope.setView=()=>{navigations++;};
+  vm.runInNewContext(bundle,scope);const observer=observers[0];assert.equal(observer.target,doc.documentElement);assert.deepEqual(JSON.parse(JSON.stringify(observer.options)),{attributes:true,attributeFilter:['data-agent-city-mode']});
+  const dom=()=>{doc.readyState='complete';for(const fn of [...(doc.handlers.DOMContentLoaded||[])])fn();};
+  const mode=()=>{doc.documentElement.dataset.agentCityMode='passive_dashboard';observer.cb();};
+  if(ordering==='dom-then-mode'){dom();assert.equal(scope.AgentCityObservedController,undefined);mode();}
+  if(ordering==='mode-then-dom'){mode();assert.equal(scope.AgentCityObservedController,undefined);dom();}
+  if(ordering==='dom-ready-mode-later'){assert.equal(scope.AgentCityObservedController,undefined);mode();}
+  assert.ok(scope.AgentCityObservedController);assert.equal(observer.disconnected,true);for(const fn of queue)fn();
+  assert.equal(doc.getElementById('catalog-view').hidden,false);assert.equal(doc.getElementById('page-title').hidden,false);assert.equal(doc.getElementById('page-title').textContent,'Модели');assert.equal(models.className,'active');assert.equal(doc.getElementById('observed-work-view').hidden,true);
+  assert.equal(nav.children.filter(n=>n.dataset.observedPage==='history').length,1);assert.equal(refreshes,0);assert.equal(navigations,0);assert.equal(renders,1);assert.equal((listeners['agentcity:live-summary']||[]).length,1); // Only the feed subscription remains.
+  observer.cb();dom();for(const fn of [...(listeners['agentcity:live-summary']||[])])fn({detail:{source:{status:'unavailable'},sessions:[]}});
+  assert.equal(nav.children.filter(n=>n.dataset.observedPage==='history').length,1);assert.equal(queue.length,1);assert.equal(refreshes,0);
+ }
+});
+
+
+test('bound History copy is timeless, recorded duration omits redundant note, and only detail-heading outline is suppressed',()=>{
+ const h=setup(),s=session('bound',{scope:{kind:'turn',id:'synthetic-old-turn'},status:'completed',endedAt:'2026-01-01T10:00:00Z',durationMs:12000,durationSource:'collector-reported-duration'});
+ h.ui.update(feed([s]));h.ui.navigate({page:'history',sessionId:'bound'});assert.match(by(h.root,'ow-breadcrumb').textContent,/Выполнение/);assert.doesNotMatch(by(h.root,'ow-breadcrumb').textContent,/Текущий ход/);
+ const note=by(h.root,'ow-metrics').children[0].children[2];assert.equal(note.hidden,true);assert.equal(note.textContent,'');assert.equal(h.ui.model.selected.durationMs,12000);assert.equal(h.doc.activeElement,by(h.root,'ow-detail-title'));
+ h.ui.update(feed([{...s,durationSource:'derived-from-observed-turn-bounds'}]));assert.equal(note.hidden,false);assert.match(note.textContent,/границам/);assert.equal(h.ui.model.selected.durationMs,12000);
+ const css=require('node:fs').readFileSync(require('node:path').join(__dirname,'../static/observed-work.css'),'utf8');assert.ok(css.includes('.observed-work .ow-detail-title:focus { outline:none; }'));assert.ok(css.includes('.ow-breadcrumb>.ow-crumb + .ow-crumb::before'));assert.ok(css.includes('.observed-work :focus-visible { outline:2px'));
 });
