@@ -1,0 +1,25 @@
+name: Passive observed view cloud checks
+on:
+  pull_request:
+    branches: [work/portable-report-preparation]
+permissions:
+  contents: read
+jobs:
+  synthetic:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/observed-work.test.cjs tests/observed-renderer.test.cjs tests/observed-tasks.test.cjs
+      - run: python -X warn_default_encoding -W error::EncodingWarning -m unittest discover -s tests -p test_observed_frontend.py -v
+      - run: python tools/verify_separation.py
