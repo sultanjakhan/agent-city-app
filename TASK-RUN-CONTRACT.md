@@ -139,3 +139,38 @@ execution attempt. Real installed-app E2E still requires an approved authenticat
 bridge, an explicit real assignment and current native receipts, followed by
 observed delivery and passive dashboard verification. No endpoint is enabled by
 this adapter, and it does not change the installed GET-only dashboard.
+
+### Use the existing guarded report/import flow
+
+No new importer is needed. For a prepared v1 envelope, the existing
+`agent_city_report_run` MCP consumes its exact native binding and report:
+
+```python
+envelope = prepared['envelope']
+arguments = {key: envelope[key] for key in ('binding', 'report')}
+# Only with an explicitly configured, authorized application transport:
+invoke('agent-city', authorized_transport, 'agent_city_report_run', arguments)
+```
+
+This routes through the existing `/api/agent/report` owner/CSRF or one-use-grant
+checks, personal/native authority validation, explicit pairing and WorkExchange
+preview/revision/apply guards. The prepared wrapper is never posted as a report.
+Alternatively, an already paired task's nested `envelope` can be passed unchanged
+as JSON `document` to the existing owner-authorized WorkExchange preview/apply
+flow. Apply requires its returned preview token and current revision and checks
+native authority again. Preparation is not a transport capability. An existing
+pair pins the selected profile; a parser-only envelope does not carry a trusted
+profile selection or establish such a pin by itself.
+
+`python -m unittest discover -s tests -p test_portable_report_integration.py -v`
+exercises this connection in cloud Linux with temporary synthetic Cicada SQLite
+and native binding receipts, a real Store, real owner bootstrap, guarded HTTP
+imports and real dashboard projection. Only skill inventory and the MCP-to-test
+HTTP transport are substituted; no native authority or dashboard response is
+mocked. It checks original task identity, observed tokens/applied skills, null
+measurements, replay/newer/stale sequences, paired profile/source fencing,
+revoked authority, preview/revision revalidation and persistence after reopening
+the Store. Native task completion, version and timer data remain byte-identical.
+This is synthetic integration evidence, not installed-app E2E or authenticated
+remote delivery. The PC-local pipe still needs a separately approved authenticated
+bridge before cloud reports can reach a real installed application.
