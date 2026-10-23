@@ -1,4 +1,4 @@
-"""Apply the shipped patch to exact supplied anchors, execute its changed paths."""
+"""Assemble complete files from exact frozen substrings; execute changed paths."""
 import json
 from pathlib import Path
 import subprocess
@@ -31,14 +31,35 @@ class Collector:
         (self.app/'cicada_connector.py').write_text(connector)
         renderer=PATCH_METRICS+'\n  function updateStageNode(stage, summary, stageDuration) {\n'+STAGE_METRICS+'  }\n'
         (self.app/'static/live-sessions.js').write_text(renderer)
-        (self.app/'static/index.html').write_text(LIVE_SCRIPT)
+        self.html='<!doctype html><html><body>'+LIVE_SCRIPT+'<script src="/app.js" defer></script></body></html>'
+        (self.app/'static/index.html').write_text(self.html)
+        self.assertIn(r'\u00b7', renderer)
+        self.assertNotIn(' · ', PATCH_METRICS)
         patch=(ROOT/'compat/frozen-exact-turn.patch').read_text()
         self.assertEqual(patch_text(ROOT),patch)
         expected=check_sources(self.root,ROOT)
-        checked=subprocess.run(['git','apply','--unidiff-zero','--check','-'],input=patch,text=True,cwd=self.root,capture_output=True)
-        self.assertEqual(0,checked.returncode,checked.stderr)
-        subprocess.run(['git','apply','--unidiff-zero','-'],input=patch,text=True,cwd=self.root,check=True,capture_output=True)
+        before={path:path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+        result=subprocess.run(['python','-m','compat.frozen_patch','--check-root',str(self.root),'--planned-files-json'],cwd=ROOT,capture_output=True,text=True,check=True)
+        self.assertEqual(expected,json.loads(result.stdout))
+        self.assertEqual(before,{path:path.read_bytes() for path in self.root.rglob('*') if path.is_file()})
+        self.original_files=before
+        # Synthetic private-assembler equivalent: only complete planned files.
+        for name,content in expected.items():
+            (self.root/name).write_bytes(content.encode('utf-8'))
         for name,content in expected.items():self.assertEqual(content,(self.root/name).read_text())
+
+    def test_missing_or_duplicate_anchor_rejected_without_writes(self):
+        for name in ('passive_attempts.py','static/passive-attempt-view.js'):(self.app/name).unlink()
+        for path,content in self.original_files.items():path.write_bytes(content)
+        path=self.app/'static/live-sessions.js'
+        original=path.read_bytes()
+        for text in ('missing anchor', original.decode()+PATCH_METRICS):
+            path.write_text(text)
+            before=path.read_bytes()
+            with self.assertRaisesRegex(ValueError,'anchor absent or ambiguous'):
+                check_sources(self.root,ROOT)
+            self.assertEqual(before,path.read_bytes())
+        path.write_bytes(original)
 
     def test_applied_collector_singular_models_efforts_only_existing_measured_counters(self):
         scope={};exec((self.app/'live_sessions.py').read_text(),scope)
@@ -66,7 +87,8 @@ class Collector:
         self.assertIn("identity_fields=('projectId', 'agentId', 'parentId')",entry)
         self.assertNotIn('do_POST',entry)
         html=(self.app/'static/index.html').read_text()
-        self.assertLess(html.index('/passive-attempt-view.js'),html.index('/live-sessions.js'))
+        self.assertEqual(self.html.replace(LIVE_SCRIPT,'<script src="/passive-attempt-view.js" defer></script>'+LIVE_SCRIPT),html)
+        self.assertNotIn('\n',html)
         self.assertEqual((ROOT/'passive_attempts.py').read_text(),(self.app/'passive_attempts.py').read_text())
 
     def test_applied_exact_patchMetrics_executes_helper_and_leaves_unbound_path(self):

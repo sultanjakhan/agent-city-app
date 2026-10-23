@@ -1,4 +1,4 @@
-"""Generate context patch against the exact supplied frozen anchors; no installer."""
+"""Read-only exact-substring assembly of complete frozen source files; no installer."""
 import difflib
 from pathlib import Path
 from compat.frozen_fragments import PASSIVE_ASSIGNMENT, STAGE_RETURN, PATCH_METRICS, STAGE_METRICS, CONNECTOR_INIT, CONNECTOR_TOKS, CONNECTOR_RETURN, LIVE_SCRIPT
@@ -39,14 +39,14 @@ def changes(root):
             (connector, CONNECTOR_RETURN, "            return [dict(task, personalEligible=personal_eligibility[task['sourceId']]) for task in result[:500]], len(result) > 500\n"),
             ('native/agent-system/app/static/live-sessions.js', PATCH_METRICS, metrics),
             ('native/agent-system/app/static/live-sessions.js', STAGE_METRICS, stage_metrics),
-            ('native/agent-system/app/static/index.html', LIVE_SCRIPT, '<script src="/passive-attempt-view.js" defer></script>\n' + LIVE_SCRIPT),
+            ('native/agent-system/app/static/index.html', LIVE_SCRIPT, '<script src="/passive-attempt-view.js" defer></script>' + LIVE_SCRIPT),
             ('native/agent-system/app/static/passive-attempt-view.js', '', helper),
             ('native/agent-system/app/passive_attempts.py', '', (Path(root)/'passive_attempts.py').read_text())]
 
 
 
 def patch_text(root):
-    return ''.join(''.join(difflib.unified_diff(before.splitlines(True), after.splitlines(True),
+    return '# REVIEW EXCERPTS ONLY: not a git-applicable patch; use check_sources complete files.\n' + ''.join(''.join(difflib.unified_diff(before.splitlines(True), after.splitlines(True),
                      fromfile='a/'+name if before else '/dev/null', tofile='b/'+name, n=3)) for name,before,after in changes(root))
 
 
@@ -57,7 +57,7 @@ def check_sources(root, source_root):
         path = Path(root)/name
         if name not in files:
             if before:
-                files[name] = path.read_text()
+                files[name] = path.read_bytes().decode('utf-8')
             else:
                 if path.exists(): raise ValueError('new adapter file already exists: '+name)
                 files[name] = ''
@@ -72,9 +72,16 @@ if __name__ == '__main__':
     import argparse
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check-root', type=Path, help='read-only unique-anchor check of a NEW frozen source copy')
+    parser.add_argument('--planned-files-json', action='store_true', help='emit complete planned files as JSON to stdout; requires --check-root; no source writes')
     args=parser.parse_args()
+    if args.planned_files_json and not args.check_root:
+        parser.error('--planned-files-json requires --check-root')
     source_root=Path(__file__).resolve().parents[1]
     if args.check_root:
         planned=check_sources(args.check_root, source_root)
-        print('Exact frozen anchor preflight passed for',len(planned),'files; no files written')
+        if args.planned_files_json:
+            import json
+            print(json.dumps(planned, ensure_ascii=True))
+        else:
+            print('Exact frozen anchor preflight passed for',len(planned),'files; no files written')
     else: print(patch_text(source_root), end='')

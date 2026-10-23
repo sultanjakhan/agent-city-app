@@ -1,3 +1,4 @@
+# REVIEW EXCERPTS ONLY: not a git-applicable patch; use check_sources complete files.
 --- a/passive_server.py
 +++ b/passive_server.py
 @@ -1 +1,5 @@
@@ -58,10 +59,8 @@
 +      : `${formatNumber(stage.usage?.total)} tokens · ${formatDuration(stageDuration)}`;
 --- a/native/agent-system/app/static/index.html
 +++ b/native/agent-system/app/static/index.html
-@@ -1 +1,2 @@
-+<script src="/passive-attempt-view.js" defer></script>
- <script src="/live-sessions.js" defer></script>
---- /dev/null
+@@ -1 +1 @@
+-<script src="/live-sessions.js" defer></script>+<script src="/passive-attempt-view.js" defer></script><script src="/live-sessions.js" defer></script>--- /dev/null
 +++ b/native/agent-system/app/static/passive-attempt-view.js
 @@ -0,0 +1,31 @@
 +'use strict';

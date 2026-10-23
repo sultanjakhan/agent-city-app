@@ -8,23 +8,30 @@ Nothing here has been installed or accepted on Mac.
 
 ## Reviewable source splice
 
-`compat/frozen-exact-turn.patch` contains the complete splice against the supplied
-anchors and two new modules. `compat/frozen_patch.py` reproduces it and performs a
-read-only unique-anchor preflight. Run from this checkout in cloud against a NEW
-copy of the frozen source tree (not the frozen installed runtime or foreign WIP):
+`compat/frozen_patch.py` performs read-only unique-substring preflight and returns
+complete planned files, preserving surrounding source bytes and line endings.
+`compat/frozen-exact-turn.patch` is review excerpts only, **not git-applicable**:
+the actual HTML is minified inline source, and supplied excerpts lack full-file
+line context. Do not use `git apply`, force matching or edit the installed runtime.
+
+Run from this checkout in cloud against a NEW frozen source copy:
 
 ```sh
 python -m compat.frozen_patch --check-root /path/to/new-frozen-source-copy
-git -C /path/to/new-frozen-source-copy apply --unidiff-zero --check /absolute/path/to/compat/frozen-exact-turn.patch
-git -C /path/to/new-frozen-source-copy apply --unidiff-zero /absolute/path/to/compat/frozen-exact-turn.patch
+python -m compat.frozen_patch --check-root /path/to/new-frozen-source-copy --planned-files-json > /path/to/review/planned-files.json
 ```
 
-The preflight is required: these limited-context hunks come from exact supplied
-excerpts, rather than full frozen files. Stop if an anchor is absent/ambiguous,
-files already exist, or patch checking fails. Do not force an incompatible splice.
-The preflight reads and simulates changes without writing. The coordinator owns
-assembly of a fresh runtime copy, source pins/descriptor, approved backend restart
-and installed checks. Do not copy public `server.py` over the frozen server.
+Both commands leave input files untouched. The second emits a JSON mapping of
+relative file paths to complete UTF-8 source contents. The coordinator's private
+assembler can consume that mapping after reviewing complete-file diffs. In Python,
+`check_sources(frozen_root, adapter_checkout)` returns the same mapping in memory.
+Stop if an anchor is absent/ambiguous or a new module file already exists. The
+patchMetrics anchor is raw Python text preserving literal JS `\u00b7` escapes;
+the script-tag anchor requires no newline and preserves adjacent `/app.js`.
+
+The coordinator owns source-copy assembly, source pins/descriptor, approved
+backend restart and installed checks. Do not copy public `server.py` over the
+frozen server. No source/private task data need be uploaded for assembly.
 
 The patch changes only:
 
@@ -112,8 +119,8 @@ remain unknown. This splice is not authenticated remote delivery.
 SQLite data and actual offset/working-shaped synthetic collector rows. It checks
 exact scope, personal guard, native suffix, timestamp validation, unknowns,
 reported applications vs reads, fresh revalidation, unchanged unrelated sessions
-and byte-identical task/timer data. `test_frozen_patch.py` applies the generated
-patch to synthetic supplied-anchor files, executes the patched collector and
+and byte-identical task/timer data. `test_frozen_patch.py` assembles complete
+planned files from synthetic escaped-JS/minified-HTML source files, executes the patched collector and
 connector fragments, and runs the actual patched patchMetrics in Node.
 `tests/passive-attempt-view.cjs` checks timing and formatting. These are synthetic
 cloud checks, not installed UI or real telemetry acceptance.
