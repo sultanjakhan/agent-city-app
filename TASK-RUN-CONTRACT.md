@@ -174,3 +174,12 @@ the Store. Native task completion, version and timer data remain byte-identical.
 This is synthetic integration evidence, not installed-app E2E or authenticated
 remote delivery. The PC-local pipe still needs a separately approved authenticated
 bridge before cloud reports can reach a real installed application.
+
+## Separate owner-imported observations
+
+The passive pilot in [OBSERVATION-IMPORT.md](OBSERVATION-IMPORT.md) is a distinct
+versioned metadata contract. Its session/time/provenance fields never enter the
+strict executor report endpoint, RunStore or WorkExchange pairing. An explicit
+local owner import needs only fresh read-only validation of an existing selected
+personal task; it does not require an executor binding or remote bridge. It
+cannot establish execution authority, change task lifecycle or confirm acceptance.

@@ -206,6 +206,30 @@ class CicadaConnector:
             except Exception as exc:
                 return {"source": {"id": row["id"], "label": row["label"], "profile": row["profile"]}, "status": "error", "readAt": _now(), "tasks": [], "error": "Не удалось прочитать Cicada. Проверь источник в настройках."}
 
+    def read_observation_task(self, identity):
+        """Fresh personal task read for owner observations; no executor binding."""
+        from observation_store import validate_task, ObservationError
+        validate_task(identity)
+        with self._lock:
+            selected, _ = self._read_settings()
+            candidate = self._find(selected)
+            if candidate is None: raise ObservationError('observation_source_unavailable')
+            try: path = self._source_path(candidate)
+            except CicadaConnectorError: raise ObservationError('observation_source_unavailable') from None
+            source_key = hashlib.sha256(str(path).encode()).hexdigest()[:16]
+            if candidate['profile'] != identity['profile'] or source_key != identity['sourceKey']:
+                raise ObservationError('observation_source_mismatch')
+            try: tasks, _ = self._read_db(path, source_ids=[identity['sourceId']])
+            except (sqlite3.Error, OSError, CicadaConnectorError):
+                raise ObservationError('observation_source_unavailable') from None
+            task = next((t for t in tasks if t['sourceId'] == identity['sourceId'] and t['taskKey'] == identity['taskKey']), None)
+            if task is None: raise ObservationError('observation_task_unavailable')
+            tags = {tag.strip().lower() for tag in task['tags']}
+            if ('task-sphere:personal' not in tags or 'task-sphere:work' in tags or
+                    any(tag.startswith(('jira', 'investlink')) for tag in tags)):
+                raise ObservationError('observation_personal_task_required')
+            return task
+
     @staticmethod
     def exchange_identity(path):
         from work_exchange import validate_binding, strict_json, ExchangeError
