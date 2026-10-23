@@ -37,7 +37,7 @@ def bundle(source_root):
     root = Path(source_root) / 'static'
     return '\n' + MARKER + '\n' + '\n'.join(
         (root / name).read_text(encoding='utf-8') for name in
-        ('observed-work.js', 'observed-feed.js', 'observed-host.js')) + BOOT
+        ('observed-tasks.js', 'observed-work.js', 'observed-feed.js', 'observed-host.js')) + BOOT
 
 
 def assemble(baseline_root, source_root, expected_hashes=None):

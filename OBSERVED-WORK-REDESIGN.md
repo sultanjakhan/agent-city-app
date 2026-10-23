@@ -9,15 +9,13 @@ logs or settings belongs in this checkout or public artifacts.
 
 | Page | Object and purpose | Navigation |
 | --- | --- | --- |
-| Главная | Compact list of explicitly observed current executions across projects. No planned-task inventory, repeated map or portfolio sums. | Open an observation. |
+| Главная | Current authoritative Cicada tasks and explicit unresolved requests for an answer/approval. Attention precedes current work; a task appears once. | Task → exact linked executions → existing observation detail; unlinked tasks have a read-only task view. |
 | Проекты | Select a project; see current observed agents, counts and explicitly recorded relations. Agent IDs remain source-scoped observations, not persistent invented identities. | Agent → current observations; project history opens the global filtered collection. |
 | История | One row per returned completed/interrupted observation. Raw session's last turn ending is inactivity, not conversation closure or task acceptance. | Project filter → same observation details. |
 
 Cicada exclusively owns tasks, timers, lifecycle and acceptance. The frontend
 never writes native data or infers a task match, blocked/waiting/success from
-silence. Unknown source coverage is separate from execution status. Empty Home
-means no active sessions observed by this source, not that all work everywhere
-has stopped. Local collector coverage does not prove cloud ingestion.
+silence. Unknown source coverage is separate from execution status. Empty Home means current work is not confirmed in the selected Cicada source, not that all work everywhere has stopped. Failed, disconnected and partial sources retain qualified last-known rows instead of implying an empty complete result. Local collector coverage does not prove cloud ingestion.
 
 Details show one task title, short project/agent/session breadcrumb, compact
 Время · Токены · Модель summary, secondary start, token breakdown disclosure,
@@ -27,8 +25,25 @@ model speed, or billable claim. Genuine multiple turns remain expandable. A sole
 bound turn gets no artificial wrapping group. UI copy is Russian; source model,
 skill and identity values remain exact.
 
+## Home projection contract
+
+`observed-tasks.js` joins only full explicit profile/sourceKey/sourceId/taskKey
+bindings. Same titles and UUIDs do not create links. Process labels remain source
+facts, not projects. Timer-active non-completed tasks, exact observed current
+executions, or exact-task running/waiting reports within 300 seconds (30 seconds
+future skew) qualify as current. Paused-only or planned tasks do not.
+Latest reports are selected by sequence per originDevice/runId. Only latest
+waiting reports with user_input/approval request attention; those requests do not
+expire with heartbeat age. A newer terminal report resolves them. Ordinary
+waiting, errors and failed verification do not imply a request for a person.
+Source changes isolate report namespaces; open old-source selections retain
+explicit old-source facts without current timer claims. Counts stay unknown
+without explicit linked current observations. There are no portfolio metrics,
+question fabrication, result URL actions, or task mutation controls.
+
 ## New public modules
 
+- `static/observed-tasks.js`: pure task projection and keyed compact task master/detail, using the existing dashboard source only.
 - `static/observed-work.js`: pure normalized state model plus keyed DOM component;
   `createModel`, `mount`, `parseRoute`, `formatRoute`, `timing` exports. No transport
   or persistence. `mount(root, {initialRoute, onRoute, externalNavigation})` returns
@@ -44,10 +59,9 @@ skill and identity values remain exact.
   Applications require an exact bound turn, binding.skillSource executor-reported,
   skillsKnown true and an explicit skill-applied executor-reported activity event.
 - `static/observed-host.js`: opt-in adapter around the existing `window.LiveSessions`
-  cache, visibility lifecycle, navigation hooks and summary event. It hides legacy
+  cache, visibility lifecycle, navigation hooks and summary event, plus the existing lexical dashboardData/dashboardReadError cache and original loadDashboard lifecycle. It hides legacy
   duplicate Home/session surfaces and adds History navigation. Models, Connections
-  and Limits retain their handlers. Legacy hidden renderer/polling remains the
-  source owner; there is no extra polling, fetch, endpoint or daemon.
+  and Limits retain their handlers. The original dashboard loader retains its single five-second visible-Home schedule; LiveSessions retains its observation schedule. Old dashboard rendering stays hidden; there is no extra polling, fetch, endpoint or daemon.
 - `compat/observed_frontend.py`: assembles these newly authored modules into the
   two already-served LiveSessions JS/CSS assets. No static allowlist change.
 
@@ -106,7 +120,7 @@ discovery false and cloud false.
 Node tests execute the actual model, mapper, keyed renderer and host adapter with
 synthetic metadata and a small DOM recording harness. They cover scope/unknowns,
 read vs application, no native task/timer mutation, selection after completion,
-route stability, focus, disclosures and scroll preservation. The DOM harness is
+route stability, focus, disclosures and scroll preservation. Task tests additionally cover exact identity isolation, attention/current deduplication, latest-report resolution, freshness/skew, incomplete/failure/recovery, source switches with open details, unknown counts, no-session tasks, task/execution/back flow and reuse of the old loader schedule. The DOM harness is
 not a browser/layout oracle. Python tests cover the actual two-asset assembler,
 byte-identical originals, UTF-8, explicit input hashes and duplicate assembly
 rejection. These tests use no private baseline files.

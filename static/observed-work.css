@@ -58,3 +58,11 @@ body.nav-collapsed .app-header [data-observed-page] .compact-label { display:blo
 
 .ow-breadcrumb>.ow-crumb + .ow-crumb::before { content:"/"; color:var(--muted,#707070); margin-right:8px; }
 .observed-work .ow-detail-title:focus { outline:none; }
+
+/* Cicada Home uses the same compact master/detail vocabulary. */
+.ow-task-home { min-width:0; }
+.ow-task-section { margin:20px 0 8px; font-size:14px; font-weight:650; }
+.ow-task-section:first-child { margin-top:0; }
+.ow-task-detail h4 { margin:20px 0 8px; font-size:14px; }
+.ow-task-requests { margin:12px 0; padding-left:20px; font-size:13px; }
+.ow-task-execution { display:block; width:100%; overflow-wrap:anywhere; }

@@ -1,7 +1,7 @@
-/* Opt-in passive host adapter. Uses only the existing cached LiveSessions API. */
+/* Opt-in passive host adapter. Reuses the existing LiveSessions and dashboard source owners. */
 (function(root){
  'use strict';
- function install({document= root.document,window=root,view= root.AgentCityObserved,feed=root.AgentCityObservedFeed}={}){
+ function install({document= root.document,window=root,view= root.AgentCityObserved,feed=root.AgentCityObservedFeed,taskHome=root.AgentCityTaskHome,taskFeed=null}={}){
   const legacy=window.LiveSessions,oldRoot=document.getElementById('live-sessions-view'),dashboard=document.getElementById('dashboard-view');
   if(!legacy||!oldRoot||!dashboard||oldRoot.dataset.observedOwner)throw Error('Несовместимый или уже подключённый пассивный интерфейс');
   // No native actions, additional endpoint, discovery, or transport authority.
@@ -9,7 +9,7 @@
   oldRoot.dataset.observedOwner='true';
   let pending=null,lastSurface=null,visible=false,routing=false;
   function hostRoute(r){pending=r;if(typeof window.setView==='function')window.setView(r.page==='home'?'dashboard':'sessions');}
-  const ui=view.mount(surface,{externalNavigation:true,onRoute:r=>{if(!routing)hostRoute(r);}});
+  const ui=view.mount(surface,{externalNavigation:true,taskHome,onRoute:r=>{if(!routing)hostRoute(r);}});
   const nav=document.querySelector('.app-header nav'),historyButton=document.createElement('button');
   historyButton.type='button';historyButton.dataset.observedPage='history';historyButton.setAttribute('aria-label','История');historyButton.title='История';
   const full=document.createElement('span');full.textContent='История';const small=document.createElement('small');small.className='compact-label';small.textContent='История';const clock=document.createElementNS('http://www.w3.org/2000/svg','svg');clock.setAttribute('viewBox','0 0 24 24');clock.setAttribute('aria-hidden','true');clock.setAttribute('focusable','false');
@@ -44,13 +44,20 @@
   // Host render assigns dashboard visibility after viewChanged; keep projection
   // visibility aligned without polling or observing user/source content.
   function afterRender(){if(!visible)return;oldRoot.hidden=true;dashboard.hidden=true;const title=document.getElementById('page-title');if(title)title.hidden=true;selectedNav();}
-  const originalDashboard=window.renderDashboard,originalRender=window.render,originalLoad=window.loadDashboard;
+  const originalDashboard=window.renderDashboard,originalRender=window.render,originalLoad=window.loadDashboard,originalRows=window.renderDashboardRows;
+  // These are global lexical bindings in the installed shell, not window fields.
+  // Read only after boot; tests may inject the same cache/subscription contract.
+  const readTasks=taskFeed?.read||(()=>({snapshot:typeof dashboardData==='undefined'?null:dashboardData,error:typeof dashboardReadError==='undefined'?null:dashboardReadError}));
+  function syncTasks(){const value=readTasks();ui.updateTasks(value?.snapshot,value?.error);afterRender();}
+  const unsubscribeTasks=taskFeed?.subscribe?.(syncTasks);
+  syncTasks();
   if(typeof originalRender==='function')window.render=function(...args){const result=originalRender.apply(this,args);afterRender();return result;};
-  window.loadDashboard=async()=>legacy.refresh();
-  window.renderDashboard=function(){afterRender();};
+  if(typeof originalLoad==='function')window.loadDashboard=async function(...args){try{return await originalLoad.apply(this,args);}finally{syncTasks();}};
+  window.renderDashboardRows=function(){syncTasks();};
+  window.renderDashboard=function(){if(typeof window.loadDashboard==='function')void window.loadDashboard(false);afterRender();};
   const click=e=>{const b=e.target.closest?.('[data-view]');if(b?.dataset.view==='dashboard')pending={page:'home'};else if(b?.dataset.view==='sessions')pending={page:'projects'};};
   document.addEventListener('click',click,true);
-  return {ui,afterRender,disconnect(){connected.disconnect();legacy.viewChanged=originalVisible;legacy.openProject=originalProject;legacy.openSession=originalSession;window.renderDashboard=originalDashboard;window.render=originalRender;window.loadDashboard=originalLoad;document.removeEventListener('click',click,true);delete oldRoot.dataset.observedOwner;historyButton.remove();ui.destroy();surface.remove();oldRoot.hidden=true;dashboard.hidden=false;}};
+  return {ui,afterRender,disconnect(){connected.disconnect();unsubscribeTasks?.();legacy.viewChanged=originalVisible;legacy.openProject=originalProject;legacy.openSession=originalSession;window.renderDashboard=originalDashboard;window.render=originalRender;window.loadDashboard=originalLoad;window.renderDashboardRows=originalRows;document.removeEventListener('click',click,true);delete oldRoot.dataset.observedOwner;historyButton.remove();ui.destroy();surface.remove();oldRoot.hidden=true;dashboard.hidden=false;}};
  }
  const api=Object.freeze({install});if(typeof module==='object'&&module.exports)module.exports=api;else root.AgentCityObservedHost=api;
 })(typeof globalThis==='object'?globalThis:this);

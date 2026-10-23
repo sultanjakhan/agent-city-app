@@ -25,6 +25,7 @@
    const task=row.task&&typeof row.task==='object'?{title:text(row.task.title),goal:text(row.task.goal),
     identity:Object.fromEntries(['profile','sourceKey','sourceId','taskKey','nativeTaskKey'].map(k=>[k,text(row.task.identity?.[k])]))}:null;
    return {id:id(row.id),projectId:id(row.projectId),agentId:row.agentId===null||row.agentId===undefined?null:id(row.agentId),
+    taskBinding:row.taskBinding?Object.fromEntries(['profile','sourceKey','sourceId','taskKey'].map(k=>[k,text(row.taskBinding[k])])):null,
     parentId:text(row.parentId),name:text(row.name)||row.id,scope:{kind:row.scope.kind,id:id(row.scope.id)},...measurement(row),task,
     events:events(row.events),appliedSkills:row.appliedSkills===null||row.appliedSkills===undefined?null:unique(row.appliedSkills,event=>{
      if(event.kind!=='applied'||event.source!=='executor-reported')throw Error('Требуется явное свидетельство применения навыка');
@@ -58,7 +59,7 @@
   if(row.status==='working'&&!row.endedAt&&Number.isFinite(start)&&start<=now)return {value:Math.floor(now-start),note:'С начала наблюдения · идёт сейчас, не завершённая длительность'};
   return {value:null,note:'Длительность неизвестна'};
  }
- function mount(container,{initialRoute,onRoute=()=>{},now=()=>Date.now(),externalNavigation=false}={}){
+ function mount(container,{initialRoute,onRoute=()=>{},now=()=>Date.now(),externalNavigation=false,taskHome=null}={}){
   const doc=container.ownerDocument,model=createModel(initialRoute);const node=(tag,cls,value)=>{const n=doc.createElement(tag);if(cls)n.className=cls;if(value!==undefined)n.textContent=value;return n;};
   const put=(n,value)=>{if(n.textContent!==String(value))n.textContent=String(value);};
   function button(label,action,cls='ow-button'){const n=node('button',cls,label);n.type='button';n.addEventListener('click',action);return n;}
@@ -80,6 +81,7 @@
   filter.setAttribute('aria-label','Проект');filter.addEventListener('change',()=>navigate({...model.route,projectId:filter.value||null,agentId:null,sessionId:null}));
   const rows=node('div','ow-rows'),empty=node('p','ow-empty');
   projectArea.append(agents,edges,projectHistory);main.append(heading,filter,projectArea,rows,empty);
+  const homeArea=node('section','ow-task-home');main.append(homeArea);const homeWidget=taskHome?taskHome.mount(homeArea,{node,put,button,list,facts,reveal,now,onOpenSession:id=>navigate({page:'home',sessionId:id}),onSelectTask:()=>{if(model.route.sessionId)navigate({page:'home'});}}):null;
   const detail=node('section','ow-detail'),crumb=node('nav','ow-breadcrumb'),detailTitle=node('h3','ow-detail-title'),detailStatus=node('p','ow-secondary'),unavailable=node('p','ow-empty','Выбранное наблюдение недоступно в этом снимке.'),summary=node('dl','ow-metrics'),start=node('p','ow-secondary');
   crumb.setAttribute('aria-label','Путь к сессии');
   const crumbs={};for(const k of ['project','agent','session']){const n=button('',()=>{const s=model.selected;if(!s)return;if(k==='project')navigate({page:'projects',projectId:s.projectId});if(k==='agent')navigate({page:'projects',projectId:s.projectId,agentId:s.agentId});},'ow-crumb');crumbs[k]=n;crumb.append(n);}crumbs.session.disabled=true;
@@ -113,7 +115,7 @@
    const saved=listReturn||{route:{...model.route,sessionId:null},selectedId:model.route.sessionId,positions:[]};
    navigate(saved.route);
    for(const [n,top,left] of saved.positions){n.scrollTop=top;n.scrollLeft=left;}
-   reveal(rows._rows?.get(saved.selectedId)||heading);
+   if(homeWidget?.selected&&model.route.page==='home')homeWidget.returnFromSession(saved.selectedId);else reveal(rows._rows?.get(saved.selectedId)||heading);
   }
   function navigate(r){
    const previous=model.route.sessionId,destination=route(r),different=destination.sessionId&&destination.sessionId!==previous;
@@ -124,7 +126,7 @@
   function facts(parent,values){list(parent,values,x=>x[0],()=>{const n=node('div'),k=node('dt'),v=node('dd');n.append(k,v);n._k=k;n._v=v;return n;},(n,[k,v])=>{put(n._k,k);put(n._v,v??'Неизвестно');});}
   function eventRows(parent,items){list(parent,items,x=>x.id,()=>{const n=node('li'),at=node('time'),label=node('span');n.append(at,label);n._at=at;n._label=label;return n;},(n,e)=>{put(n._at,e.at?new Date(e.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'Время неизвестно');if(e.at)n._at.setAttribute('datetime',e.at);else n._at.removeAttribute('datetime');put(n._label,e.label);});}
   function patchDetail(){
-   const r=model.route,s=model.selected;layout.classList.toggle('ow-detail-selected',Boolean(r.sessionId));detail.hidden=!r.sessionId;unavailable.hidden=!!s;detailsBody.hidden=!s;crumb.hidden=!s;if(!s)return;
+   const r=model.route,s=model.selected;layout.classList.toggle('ow-detail-selected',Boolean(r.sessionId));detail.hidden=!r.sessionId;put(back,homeWidget?.selected&&r.page==='home'?'Назад к задаче':'Назад к списку');unavailable.hidden=!!s;detailsBody.hidden=!s;crumb.hidden=!s;if(!s)return;
    if(selectedId!==s.id){remember();selectedId=s.id;const saved=sessionState.get(s.id)||{};tab=saved.tab||'activity';usage.node.open=!!saved.usage;identity.node.open=!!saved.identity;diagnostics.node.open=!!saved.diagnostics;}
    const project=model.data.projects.find(p=>p.id===s.projectId),agent=model.data.agents.find(a=>a.id===s.agentId);
    put(crumbs.project,project?.name||'Проект неизвестен');put(crumbs.agent,agent?.name||'Агент неизвестен');crumbs.agent.disabled=!s.agentId;put(crumbs.session,s.scope.kind==='turn'?'Выполнение':'Сессия');
@@ -145,16 +147,18 @@
   }
   function patch(){
    const r=model.route,d=model.data;for(const [k,n] of Object.entries(navButtons))n.setAttribute('aria-current',k===r.page?'page':'false');
-   put(freshBody,d.source.message||'Охват определяется подключённым источником. Отсутствие сессии не подтверждает отсутствие работы вне него.');
-   put(freshLabel,({fresh:'Источник доступен',partial:'Частичный снимок',stale:'Данные устарели',unavailable:'Источник недоступен',unknown:'Актуальность неизвестна'}[d.source.status])+(d.source.readAt?' · '+new Date(d.source.readAt).toLocaleTimeString('ru-RU'):''));
-   put(heading,{home:'Сейчас',projects:'Проекты',history:'История'}[r.page]);
+   const homeSource=r.page==='home'&&homeWidget?homeWidget.source():null;
+   put(freshBody,homeSource?homeSource.detail+' · Выполнения: '+d.source.status:d.source.message||'Охват определяется подключённым источником. Отсутствие сессии не подтверждает отсутствие работы вне него.');
+   put(freshLabel,homeSource?homeSource.label:({fresh:'Источник доступен',partial:'Частичный снимок',stale:'Данные устарели',unavailable:'Источник недоступен',unknown:'Актуальность неизвестна'}[d.source.status])+(d.source.readAt?' · '+new Date(d.source.readAt).toLocaleTimeString('ru-RU'):''));
+   put(heading,{home:homeWidget?'Главная':'Сейчас',projects:'Проекты',history:'История'}[r.page]);
    list(filter,[{id:'',name:r.page==='projects'?'Выберите проект':'Все проекты'},...d.projects],x=>x.id,()=>node('option'),(n,p)=>{n.value=p.id;put(n,p.name);});filter.value=r.projectId||'';filter.hidden=r.page==='home';projectArea.hidden=r.page!=='projects';
    const active=model.projectAgents(r.projectId);list(agents,r.page==='projects'?active:[],x=>x.id,a=>button('',()=>navigate({page:'projects',projectId:a.projectId,agentId:a.id}),'ow-agent'),(n,a)=>put(n,a.name+' · '+a.currentCount));
    list(edges,r.page==='projects'?model.projectEdges(r.projectId):[],x=>x.id,()=>node('li'),(n,e)=>{const names=k=>d.agents.find(a=>a.id===k)?.name||k;put(n,names(e.fromAgentId)+' → '+names(e.toAgentId)+' · '+e.label);});projectHistory.hidden=!r.projectId;
-   const sessions=model.rows();list(rows,sessions,x=>x.id,s=>{const n=button('',()=>navigate({...model.route,sessionId:s.id}),'ow-session'),title=node('span','ow-session-title'),status=node('span','ow-status'),scope=node('span','ow-secondary');n.append(title,status,scope);n._title=title;n._status=status;n._scope=scope;return n;},(n,s)=>{const agentName=d.agents.find(a=>a.id===s.agentId&&a.projectId===s.projectId)?.name||'Агент неизвестен';put(n._title,s.task?.title||agentName+' · '+s.name);n.title=s.id;put(n._status,executionLabel(s));const scopeLabel=s.scope.kind==='turn'?'За выполнение':s.scope.kind==='session'?'За сессию':'За интервал';const date=s.endedAt?new Date(s.endedAt).toLocaleString('ru-RU',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'Дата неизвестна';put(n._scope,(d.projects.find(p=>p.id===s.projectId)?.name||'Проект неизвестен')+' · '+(s.task?.title?agentName+' · ':'')+(r.page==='history'?scopeLabel+' · '+date+' · '+duration(timing(s,now()).value)+' · ':'')+number(s.usage.total)+' токенов');n.setAttribute('aria-pressed',String(s.id===r.sessionId));});
-   put(empty,r.page==='projects'&&!r.projectId?'Выберите проект.':['unavailable','unknown'].includes(d.source.status)?'Текущий список не подтверждён источником.':r.page==='home'?'Текущие исполнения не наблюдаются.':r.page==='history'?'Завершённые исполнения не наблюдаются.':'Выберите проект или наблюдаемую сессию.');empty.hidden=sessions.length>0;patchDetail();
+   homeArea.hidden=r.page!=='home'||!homeWidget;rows.hidden=r.page==='home'&&!!homeWidget;empty.hidden=r.page==='home'&&!!homeWidget;homeWidget?.setSessionOpen(r.page==='home'&&!!r.sessionId);
+   const sessions=r.page==='home'&&homeWidget?[]:model.rows();list(rows,sessions,x=>x.id,s=>{const n=button('',()=>navigate({...model.route,sessionId:s.id}),'ow-session'),title=node('span','ow-session-title'),status=node('span','ow-status'),scope=node('span','ow-secondary');n.append(title,status,scope);n._title=title;n._status=status;n._scope=scope;return n;},(n,s)=>{const agentName=d.agents.find(a=>a.id===s.agentId&&a.projectId===s.projectId)?.name||'Агент неизвестен';put(n._title,s.task?.title||agentName+' · '+s.name);n.title=s.id;put(n._status,executionLabel(s));const scopeLabel=s.scope.kind==='turn'?'За выполнение':s.scope.kind==='session'?'За сессию':'За интервал';const date=s.endedAt?new Date(s.endedAt).toLocaleString('ru-RU',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'Дата неизвестна';put(n._scope,(d.projects.find(p=>p.id===s.projectId)?.name||'Проект неизвестен')+' · '+(s.task?.title?agentName+' · ':'')+(r.page==='history'?scopeLabel+' · '+date+' · '+duration(timing(s,now()).value)+' · ':'')+number(s.usage.total)+' токенов');n.setAttribute('aria-pressed',String(s.id===r.sessionId));});
+   put(empty,r.page==='projects'&&!r.projectId?'Выберите проект.':['unavailable','unknown'].includes(d.source.status)?'Текущий список не подтверждён источником.':r.page==='home'?'Текущие исполнения не наблюдаются.':r.page==='history'?'Завершённые исполнения не наблюдаются.':'Выберите проект или наблюдаемую сессию.');empty.hidden=sessions.length>0||r.page==='home'&&!!homeWidget;patchDetail();
   }
-  patch();return {model,update(feed){remember();model.update(feed);patch();},navigate,destroy(){shell.remove();},element:shell};
+  patch();return {model,home:homeWidget,updateTasks(snapshot,error){homeWidget?.update(snapshot,error);patch();},update(feed){remember();model.update(feed);homeWidget?.observe(model.data);patch();},navigate,destroy(){shell.remove();},element:shell};
  }
  const api=Object.freeze({normalize,createModel,parseRoute,formatRoute,mount,timing,number,duration});
  if(typeof module==='object'&&module.exports)module.exports=api;else root.AgentCityObserved=api;

@@ -13,6 +13,7 @@
    const turn=bound?{...matches[0],coverage:matches[0].coverage??item.coverage}:null;
    const row={id:item.id,projectId:item.projectId,agentId:item.agentId,parentId:item.parentId,name:item.name,
     scope:{kind:bound?'turn':'session',id:bound?turn.id:item.id},...metric(bound?turn:item),
+    taskBinding:bound?{...claim.task}:null,
     task:bound?{title:item.name,goal:null,identity:{...claim.task,nativeTaskKey:claim.nativeTaskKey}}:null,
     appliedSkills:null,events:[],turns:[]};
    // A malformed binding must not expose inherited thread counters as turn data.
