@@ -31,3 +31,16 @@ test('Native completed tasks and ended attempts are History; no task mutation',(
   assert.equal(JSON.stringify(item),before);
  }
 });
+
+test('preview and persisted cards display the exact full task identity',()=>{
+ const items=[];
+ const make=(tag,cls,text)=>{const item={tag,text,children:[],append(...children){this.children.push(...children);}};items.push(item);return item;};
+ scope.el=make;
+ const task={profile:'production',sourceKey:'0123456789abcdef',sourceId:'synthetic-source-id',taskKey:'cicada-0123456789abcdef-synthetic-source-id'};
+ const bundle={task,observationId:'synthetic-observation',sequence:1,coverage:{kind:'attempt',attemptId:'synthetic-turn'},exporter:{id:'synthetic-exporter',source:'synthetic-source'},fields:{},skillApplications:null};
+ for(const importedAt of [null,'2026-01-01T10:00:00Z']){
+  items.length=0;scope.drawImportedObservation({task:{title:'Synthetic task'},bundle,bundleHash:'a'.repeat(64),importedAt});
+  const rendered=items.map(item=>item.text);
+  for(const key of ['profile','sourceKey','sourceId','taskKey'])assert.ok(rendered.includes(task[key]),key);
+ }
+});

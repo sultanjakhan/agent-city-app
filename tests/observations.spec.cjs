@@ -4,7 +4,7 @@ const { test, expect } = require('./owner-fixture.cjs');
 // in test_observation_import.py. No installed runtime is exercised here.
 function observation(){
  const unknown={value:null,source:null,observedAt:null},at='2026-01-01T10:00:00Z';
- return {bundle:{schemaVersion:1,kind:'task-observation-bundle',observationId:'synthetic-ui-observation',sequence:1,
+ return {bundle:{schemaVersion:1,kind:'observation-bundle',observationId:'synthetic-ui-observation',sequence:1,
   task:{profile:'production',sourceKey:'0123456789abcdef',sourceId:'synthetic-task',taskKey:'cicada-0123456789abcdef-synthetic-task'},
   exporter:{id:'synthetic-exporter',source:'synthetic-stream'},observedAt:at,exportedAt:at,
   coverage:{kind:'attempt',attemptId:'synthetic-ui-attempt',startedAt:null,endedAt:null,source:'synthetic-event'},

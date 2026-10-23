@@ -22,7 +22,7 @@ def field(value=None, source='synthetic-executor-event', at=STAMP):
 
 
 def bundle(task):
-    return {'schemaVersion': 1, 'kind': 'task-observation-bundle', 'observationId': 'synthetic-observation-1',
+    return {'schemaVersion': 1, 'kind': 'observation-bundle', 'observationId': 'synthetic-observation-1',
             'sequence': 1, 'task': task, 'exporter': {'id': 'synthetic-exporter', 'source': 'synthetic-event-stream'},
             'observedAt': STAMP, 'exportedAt': STAMP,
             'coverage': {'kind':'attempt','attemptId':'synthetic-attempt-1','startedAt':None,'endedAt':None,'source':'synthetic-attempt-event'},
@@ -168,6 +168,21 @@ class ObservationIntegrationTests(unittest.TestCase):
         projection = self.projection()
         self.assertEqual([], projection['rows']); self.assertEqual(1, projection['unavailableCount'])
         self.assertEqual(before, self.store.observations.path.read_bytes())
+
+    def test_known_field_provenance_cannot_change_while_time_and_counters_advance(self):
+        first = copy.deepcopy(self.doc)
+        first['fields'].update(sessionId=field('synthetic-session'), inputTokens=field(1))
+        self.ingest(first); before = self.store.observations.path.read_bytes()
+        for key in ('sessionId', 'inputTokens'):
+            changed = copy.deepcopy(first); changed['sequence'] = 2
+            changed['fields'][key]['source'] = 'different-producer'
+            self.assertEqual(409, self.preview(changed)[0])
+            self.assertEqual(before, self.store.observations.path.read_bytes())
+        newer = copy.deepcopy(first); newer['sequence'] = 2
+        newer['observedAt'] = newer['exportedAt'] = '2026-01-01T10:01:00Z'
+        newer['fields']['inputTokens'] = field(2, at=newer['observedAt'])
+        self.ingest(newer)
+        self.assertEqual(2, self.projection()['rows'][0]['bundle']['fields']['inputTokens']['value'])
 
     def test_bounded_coverage_rejects_thread_totals_and_preserves_multiple_attempts(self):
         snapshot = copy.deepcopy(self.doc)

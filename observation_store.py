@@ -58,7 +58,7 @@ def validate(document):
     bundle = strict_json(document, limit=MAX_BUNDLE)
     exact(bundle, ('schemaVersion', 'kind', 'observationId', 'sequence', 'task', 'exporter',
                    'observedAt', 'exportedAt', 'coverage', 'fields', 'skillApplications'))
-    if type(bundle['schemaVersion']) is not int or bundle['schemaVersion'] != 1 or bundle['kind'] != 'task-observation-bundle':
+    if type(bundle['schemaVersion']) is not int or bundle['schemaVersion'] != 1 or bundle['kind'] != 'observation-bundle':
         raise ObservationError('invalid_observation_schema')
     opaque(bundle['observationId'])
     if type(bundle['sequence']) is not int or not 1 <= bundle['sequence'] <= 10**9:
@@ -141,6 +141,8 @@ def advance(bundle, digest, receipts):
         for key in FIELDS:
             before, after = old['fields'][key], bundle['fields'][key]
             if before['value'] is None: continue
+            if after['source'] != before['source']:
+                raise ObservationConflict('observation_provenance_conflict')
             if after['value'] is None or stamp(after['observedAt']) < stamp(before['observedAt']):
                 raise ObservationConflict('observation_measurement_regression')
             if key in ('inputTokens', 'outputTokens', 'durationMs'):

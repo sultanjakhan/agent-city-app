@@ -34,7 +34,7 @@ A strict UTF-8 JSON object, at most 32 KiB, with exactly:
 
 | Field | Contract |
 | --- | --- |
-| `schemaVersion`, `kind` | `1`, `task-observation-bundle` |
+| `schemaVersion`, `kind` | `1`, `observation-bundle` |
 | `observationId` | Opaque ID for one observation/measurement segment; keep it on updates |
 | `sequence` | Increasing positive integer; each update is a complete cumulative snapshot |
 | `task` | Exact `{profile, sourceKey, sourceId, taskKey}` from the selected personal source |
@@ -97,7 +97,9 @@ state, timers and token totals are not merged with imported observations.
 Exact historical replay is a no-op and cannot roll back the latest version.
 Different content at the same/older sequence, changed task/exporter/session or
 known model/time identity, decreasing counters, regressed observation times or
-removed/changed application evidence conflict. Unknown fields may become known.
+removed/changed application evidence conflict. A previously known field's provenance source cannot change; its observation
+timestamp may advance monotonically and cumulative counters may grow. Unknown
+fields may become known.
 At most 100 receipts/2 MiB are retained; capacity fails explicitly without
 pruning original hashes. Ten review previews, each expiring after ten minutes,
 are bounded in memory. Preview tokens and file revision are checked on approval;
@@ -177,3 +179,5 @@ executable is absent. The official cloud command
 rejected network access to `https://cdn.playwright.dev:443` by policy. Browser
 behavior/visual acceptance remains unverified. Syntax and Node classifier tests
 are separate evidence, not a browser pass. No Mac/PC fallback was attempted.
+
+The narrow frozen LiveSessions overlay is documented in [PASSIVE-ATTEMPT-ADAPTER.md](PASSIVE-ATTEMPT-ADAPTER.md); it needs no HTTP write capability.
