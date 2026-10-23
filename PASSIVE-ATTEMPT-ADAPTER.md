@@ -137,3 +137,15 @@ by network policy at cdn.playwright.dev. No bypass or Mac fallback was attempted
 Remaining installed acceptance requires the coordinator's verified current-turn
 binding, fresh selected-source read, updated pinned runtime copy and approved
 passive backend/UI check, including POST405 and unchanged task/timer data.
+
+### Windows source-regression encoding correction
+
+Exact e53 run40001264815/job120577648160 failed in Source regressions,
+`test_frozen_patch.setUp`, all three cases: generated excerpt text differed from
+the checked-in artifact at bullet characters. f3b475c
+run40002021838/job120580265965 reproduced the same issue in four cases. Packaging
+never started. Default-locale text reads/writes caused the platform difference;
+all adapter source/fixture I/O and subprocess decoding now explicitly use UTF-8,
+and CLI output is UTF-8. The regression fixture includes a non-ASCII UTF-8 marker;
+its child preflight treats implicit text-encoding warnings as errors. No CI guard
+or runtime module was changed. Linux success is not a new Windows candidate pass.

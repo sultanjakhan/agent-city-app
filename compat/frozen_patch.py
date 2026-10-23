@@ -5,7 +5,7 @@ from compat.frozen_fragments import PASSIVE_ASSIGNMENT, STAGE_RETURN, PATCH_METR
 
 
 def changes(root):
-    helper = (Path(root)/'static/passive-attempt-view.js').read_text()
+    helper = (Path(root)/'static/passive-attempt-view.js').read_text(encoding='utf-8')
     assignment = PASSIVE_ASSIGNMENT + """    from passive_attempts import BoundLiveSessions
     store.live_sessions = BoundLiveSessions(
         store.live_sessions, store.cicada, Path(value['dataDir']),
@@ -41,7 +41,7 @@ def changes(root):
             ('native/agent-system/app/static/live-sessions.js', STAGE_METRICS, stage_metrics),
             ('native/agent-system/app/static/index.html', LIVE_SCRIPT, '<script src="/passive-attempt-view.js" defer></script>' + LIVE_SCRIPT),
             ('native/agent-system/app/static/passive-attempt-view.js', '', helper),
-            ('native/agent-system/app/passive_attempts.py', '', (Path(root)/'passive_attempts.py').read_text())]
+            ('native/agent-system/app/passive_attempts.py', '', (Path(root)/'passive_attempts.py').read_text(encoding='utf-8'))]
 
 
 
@@ -70,6 +70,8 @@ def check_sources(root, source_root):
 
 if __name__ == '__main__':
     import argparse
+    import sys
+    sys.stdout.reconfigure(encoding='utf-8')
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check-root', type=Path, help='read-only unique-anchor check of a NEW frozen source copy')
     parser.add_argument('--planned-files-json', action='store_true', help='emit complete planned files as JSON to stdout; requires --check-root; no source writes')
