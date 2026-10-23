@@ -322,6 +322,8 @@ class CicadaConnector:
                     except (ValueError, TypeError, AttributeError): pass
                 tags = str(tags or "")[:65536]
                 toks = [x.strip() for x in tags.split(",") if x.strip()]
+                personal_eligible = ('task-sphere:personal' in toks and not any(
+                    tok.lower() == 'task-sphere:work' or tok.lower().startswith(('jira', 'investlink')) for tok in toks))
                 def pref(prefix: str) -> str:
                     return next((x[len(prefix):] for x in toks if x.startswith(prefix)), "")
                 process = pref("task-process:") or ("system-analysis" if pref("task-stage:") or "task-waiting" in toks else "")
@@ -336,7 +338,7 @@ class CicadaConnector:
                 stage_label = stage_map.get(stage) or (_BUILTIN.get(stage) if process == "system-analysis" else None) or stage
                 for entry in history:
                     entry["stageLabel"] = stage_map.get(entry["stage"]) or (_BUILTIN.get(entry["stage"]) if process == "system-analysis" else None) or entry["stage"]
-                result.append({"taskKey": "cicada-" + hashlib.sha256(str(path).encode()).hexdigest()[:16] + "-" + str(ident), "sourceId": str(ident), "title": str(title or "")[:500], "date": date, "plannedTime": tm, "completed": bool(completed), "isActive": bool(active), "isPaused": bool(worked_today and not active and not hidden_paused), "actualMinutes": int(seconds or 0) // 60, "process": process, "processLabel": p.get("title") or ("Системный анализ" if process == "system-analysis" else process), "stage": stage, "stageLabel": stage_label, "projects": list(dict.fromkeys(x[8:] for x in toks if x.startswith("project:") and x[8:]))[:100], "tags": [x for x in toks if not x.startswith("task-stage-log:")][:200], "waiting": "task-waiting" in toks, "stageHistory": history[-200:], "lastUpdatedAt": updated})
+                result.append({"personalEligible": personal_eligible, "taskKey": "cicada-" + hashlib.sha256(str(path).encode()).hexdigest()[:16] + "-" + str(ident), "sourceId": str(ident), "title": str(title or "")[:500], "date": date, "plannedTime": tm, "completed": bool(completed), "isActive": bool(active), "isPaused": bool(worked_today and not active and not hidden_paused), "actualMinutes": int(seconds or 0) // 60, "process": process, "processLabel": p.get("title") or ("Системный анализ" if process == "system-analysis" else process), "stage": stage, "stageLabel": stage_label, "projects": list(dict.fromkeys(x[8:] for x in toks if x.startswith("project:") and x[8:]))[:100], "tags": [x for x in toks if not x.startswith("task-stage-log:")][:200], "waiting": "task-waiting" in toks, "stageHistory": history[-200:], "lastUpdatedAt": updated})
             return result[:500], len(result) > 500
         finally:
             con.close()

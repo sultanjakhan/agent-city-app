@@ -1,51 +1,85 @@
 # Frozen passive LiveSessions exact-turn adapter
 
-This compatibility package is independent of the public full-service import UI.
-Do not copy the public `server.py` over the frozen installed server. Keep the
-supplied `passive_server.py` constructor, verified ProductionBinding, existing
-GET allowlist, every POST405, readOnly=true, discovery=false and cloud=false.
-No daemon, endpoint, writer, journal scan, credential enrollment or native task
-mutation is introduced. These modules have not been installed or accepted on Mac.
+This package adapts the supplied frozen interfaces; it does not replace the
+installed full server. Preserve verified ProductionBinding, readOnly=true,
+discovery=false, cloud=false, the GET allowlist and every POST405. No HTTP writer,
+daemon, native mutation, credential enrollment or journal reader is added.
+Nothing here has been installed or accepted on Mac.
 
-## Two small drop-in modules
+## Reviewable source splice
 
-- `passive_attempts.py`: standard-library-only read wrapper around the existing
-  `LiveSessions.snapshot()`. It reads at most 16 KiB from the single explicitly
-  owner-authored `passive-attempt-binding.json` in the existing panel directory.
-  It never creates or edits this file or a database.
-- `static/passive-attempt-view.js`: optional small formatting helper for the
-  supplied incremental renderer. It does not replace the DOM updater, polling,
-  routing, disclosures, collector or server.
+`compat/frozen-exact-turn.patch` contains the complete splice against the supplied
+anchors and two new modules. `compat/frozen_patch.py` reproduces it and performs a
+read-only unique-anchor preflight. Run from this checkout in cloud against a NEW
+copy of the frozen source tree (not the frozen installed runtime or foreign WIP):
 
-The wrapper rereads its file and the connector on every projection. It calls
-`snapshot(task_keys=[the exact connector task key])`, requires connected source,
-exact profile and sourceKey, exact original sourceId and connector taskKey, and
-personal scope tags. It keeps an optional independently supplied native taskKey
-separately: namespace-based and path-hash keys are never inferred equivalent.
-A title/UUID alone is not a binding. If tags/personal scope are unavailable, the
-exact session/turn is absent/duplicated, or any source identity changes, it leaves
-the collector snapshot unlinked and returns a bounded unavailable diagnostic.
+```sh
+python -m compat.frozen_patch --check-root /path/to/new-frozen-source-copy
+git -C /path/to/new-frozen-source-copy apply --unidiff-zero --check /absolute/path/to/compat/frozen-exact-turn.patch
+git -C /path/to/new-frozen-source-copy apply --unidiff-zero /absolute/path/to/compat/frozen-exact-turn.patch
+```
 
-Only the approved session row is projected. Its stages contain exactly the
-approved observed turn ID. Only that turn's explicit usage counters and model
-are copied; absent values stay null. Whole-thread totals, session model, past
-turns, result text, task text, action summaries and unknown metric aliases are
-not copied into the bound row. Only host-confirmed project/agent/parent identity
-keys may be retained for existing routing. Unrelated sessions remain unchanged.
-The original collector snapshot is not mutated. Directory-level collector
-summaries remain collector data; they must not be interpreted as draft usage.
+The preflight is required: these limited-context hunks come from exact supplied
+excerpts, rather than full frozen files. Stop if an anchor is absent/ambiguous,
+files already exist, or patch checking fails. Do not force an incompatible splice.
+The preflight reads and simulates changes without writing. The coordinator owns
+assembly of a fresh runtime copy, source pins/descriptor, approved backend restart
+and installed checks. Do not copy public `server.py` over the frozen server.
 
-Original turn events and skill-read inventory names are not treated as applied
-skills. The only application events injected into the bounded turn come from
-explicit `appliedSkills` records with matching turnId and fixed
-`source: "executor-reported"`, labelled **executor reported**, never independently
-verified. Null means unknown, an explicit empty list means none reported. A
-reported event outside known turn bounds is rejected. No prompts, hidden
-reasoning, messages, tool arguments, credentials or raw journals are read.
+The patch changes only:
 
-## Owner-authored binding schema
+- `passive_server.py`: wraps the existing collector assignment with
+  `BoundLiveSessions`, sessions path `('sessions',)` and routing identity fields
+  `projectId`, `agentId`, `parentId`. Store construction and server policy stay intact.
+- `native/agent-system/app/live_sessions.py`: adds per-turn singular model/effort,
+  explicit observed start, coverage, last event and duration provenance. Optional
+  cachedInput/reasoningOutput appear only if measured usage already contains them.
+- `native/agent-system/app/cicada_connector.py`: adds only `personalEligible` to
+  existing task metadata. Exact guard: literal `task-sphere:personal` token and no
+  case-insensitive work token or jira/investlink prefix. No extra query or write,
+  and no arbitrary tags exposed by the splice.
+- `native/agent-system/app/static/live-sessions.js`: calls the formatter inside
+  the actual `patchMetrics` function and stage metric assignment. Existing
+  incremental rendering, routing and disclosures remain in place.
+- `native/agent-system/app/static/index.html`: loads `/passive-attempt-view.js`
+  immediately before the supplied `/live-sessions.js` script line.
+- New app `passive_attempts.py` and static `passive-attempt-view.js` modules.
 
-Strict JSON with exactly:
+## Exact bounded attribution
+
+The wrapper reads at most 16 KiB from the single owner-authored
+`passive-attempt-binding.json` in the panel directory. It never creates the file
+or writes a store. On each projection it rereads the binding and calls the
+existing connector `snapshot(task_keys=[exact taskKey])`. Connected source,
+profile, sourceKey, original sourceId, connector taskKey and
+`personalEligible is True` must all match fresh data. Optional nativeTaskKey is
+kept separately and must have exactly the bound sourceId suffix; namespace and
+path-hash keys are never inferred equivalent. Title/UUID alone cannot bind.
+
+Only the exact session and turn are projected. Unrelated sessions and the input
+snapshot remain unchanged. Missing/duplicate turn, invalid identity, absent
+personal eligibility or changed source leaves the row unlinked with an
+unavailable diagnostic. Preserve root project/agent/parent identity. Session
+metrics, model, timestamps, current action and past turns cannot supply missing
+turn evidence. Directory summaries remain collector data, not draft usage.
+
+Collector timestamps accept explicit timezone-aware ISO8601 offsets and normalize
+to UTC. Naive, invalid, future or contradictory/order-invalid timestamps fail
+closed. The collector's `startedAt` first-seen fallback is never substituted for
+`observedStartedAt`. Exact host statuses working/completed/interrupted/unknown
+are preserved. A working turn can show clearly labelled running elapsed derived
+from its observed start; this is not completed duration. Completed duration is
+labelled either collector-reported or derived from observed turn bounds. Unknown
+stays null/Unknown; receipt/import times and thread totals are never used.
+
+The plain-text task field displays original task title, all four exact connector
+identity fields, optional native key, bounded turn identity and provenance. A
+completed/stopped attempt never completes its Cicada task or changes its timer.
+
+## Owner-authored binding
+
+Strict JSON with exactly these fields (runtime identifiers never belong in public
+source, fixtures or PR text):
 
 ```
 schemaVersion: 1
@@ -59,105 +93,40 @@ nativeTaskKey: independently supplied native key, or null
 appliedSkills: null or [{id, turnId, skill, at, kind: applied, source: executor-reported}]
 ```
 
-All identifiers, labels, times and list sizes are bounded and validated; unknown
-fields, duplicates and redirected binding paths fail closed. Runtime/pilot task
-IDs, actual sessions and approvals do not belong in public source or fixtures.
-The owner/coordinator supplies this one file through its existing permitted
-local-file workflow. This package supplies no HTTP writer or automatic task
-creation/reuse. Changing the file is a new explicit owner choice, not inferred
-attribution. A generated bindingId is a document identity, not an observed turn.
+Unknown fields, duplicate JSON keys, redirected paths and oversized input are
+rejected. Skill reads/inventory do not imply application. Only explicitly
+executor-reported applied records for this turn are projected, labelled
+**executor reported**, not independently verified. Null means unknown; an empty
+list means none reported. Known turn bounds constrain reported event times.
+No prompts, messages, hidden reasoning, tool arguments or raw logs are imported.
 
-The previously exported worker metadata snapshot is NOT a root-chat turn binding.
-An actual current root turn ID and collector mapping are still needed; do not
-substitute a whole-thread ID, create a random turn ID or borrow past thread totals.
+The coordinator supplies the real root current-turn binding through its authorized
+file workflow. The worker metadata snapshot is not a root-turn binding. Do not
+invent an observed turn ID or copy historical thread tokens/model/time. Actual
+per-turn usage and applied-skill evidence unavailable to this cloud executor
+remain unknown. This splice is not authenticated remote delivery.
 
-## Narrow integration into the supplied passive entry point
+## Synthetic cloud evidence and CI
 
-Immediately after its existing `store.live_sessions = LiveSessions(...)` line,
-the reviewed host can wrap that same collector:
+`test_passive_attempts.py` exercises the actual read-only connector with temporary
+SQLite data and actual offset/working-shaped synthetic collector rows. It checks
+exact scope, personal guard, native suffix, timestamp validation, unknowns,
+reported applications vs reads, fresh revalidation, unchanged unrelated sessions
+and byte-identical task/timer data. `test_frozen_patch.py` applies the generated
+patch to synthetic supplied-anchor files, executes the patched collector and
+connector fragments, and runs the actual patched patchMetrics in Node.
+`tests/passive-attempt-view.cjs` checks timing and formatting. These are synthetic
+cloud checks, not installed UI or real telemetry acceptance.
 
-```python
-from passive_attempts import BoundLiveSessions
-store.live_sessions = BoundLiveSessions(
-    store.live_sessions, store.cicada, Path(value['dataDir']),
-    sessions_path=HOST_VERIFIED_SESSION_LIST_PATH,
-    identity_fields=HOST_VERIFIED_ROUTING_ID_KEYS,
-)
-```
+Prior head `6bd9bd1` failed Actions run39996108969/job120559939443 in the separation
+scanner: the unreleased bundle kind accidentally matched its credential-format
+substring rule. Renaming it to `observation-bundle` fixed the collision without
+changing the guard. Parent head `ad4bb10` Windows candidate run39999199063
+succeeded; that is candidate build evidence, not native E2E or a result for later
+heads. New candidates need their own CI result.
 
-These two constants MUST come from the actual collector interface, not a guessed
-schema. For example, tests explicitly use `('sessions',)` and
-`('projectId', 'agentId')`; they are synthetic interface fixtures, not evidence of
-the installed path. No changes to Store construction, binding.verify(), server
-startup, health flags or GET/POST policy are needed. The wrapper deliberately
-omits unknown metric aliases instead of risking historical thread attribution.
-
-The existing `item.task` TEXT field receives the original native task title plus
-all four connector identity fields, optional native key, bounded turn ID and
-explicit unverified provenance. `item.name` shows that same task title. Session,
-turn and routing identities remain distinct. It never changes Cicada completion
-or timers. A stopped/completed attempt does not complete its task.
-
-## Tiny conditional renderer splice
-
-Load `passive-attempt-view.js` before the actual LiveSessions renderer through
-its existing static asset loading mechanism. In the supplied `updateStageNode`,
-replace only the `.ls-stage-metrics` assignment with this conditional; preserve
-the original calculation for unrelated/unbound stages:
-
-```javascript
-const scopedMetrics = globalThis.PassiveAttemptView.stageMetrics(
-  stage, formatNumber, formatDuration
-);
-summary.querySelector('.ls-stage-metrics').textContent = scopedMetrics !== null
-  ? scopedMetrics
-  : `${formatNumber(stage.usage?.total)} tokens · ${formatDuration(stageDuration)}`;
-```
-
-Bound stages with a reported duration show **collector-reported duration**. A running turn
-with an observed start and no end may show **running elapsed · derived from
-observed start; not completed duration**. Ended turns with no measured duration
-show **duration unknown** even if start/end exist. Receipt/import time is never
-used. Unknown total tokens remain **Unknown**, not zero or a sum of inferred
-fields. The task summary and skill labels also keep claim provenance visible.
-The existing incremental patchList/disclosure logic is unchanged.
-
-## Exact remaining source inputs
-
-The supplied excerpts are enough for this tested projector but not an honest
-claim of final installed wiring. Provide only these small interfaces from the
-frozen source, not private data or logs:
-
-1. `LiveSessions.snapshot()` return assembly and one synthetic/session schema:
-   exact session-list path plus the project/agent/parent identity fields consumed
-   by directory/session routing.
-2. The renderer's `patchMetrics(item)` function, so its exact metric field reads
-   can be checked against the deliberately scoped row. Missing fields must render
-   unknown and must not fall back to previous session/global data.
-3. The actual LiveSessions JS filename and its template script-loading line (and
-   static GET asset mapping if it is an explicit allowlist).
-4. If the verified connector omits `tags`, its existing read-only personal-scope
-   representation or exact-task projection function. No native write API is needed.
-
-The coordinator must also select the actual current root turn ID via its allowed
-read-only metadata view. No real root binding is fabricated by these cloud tests.
-
-## Cloud evidence and CI diagnosis
-
-`test_passive_attempts.py` uses a synthetic collector plus the actual read-only
-SQLite CicadaConnector with one temporary personal task and no timer. It checks
-exact turn scope, no thread-model/totals leakage, unrelated-session preservation,
-explicit reported skill events, fresh identity/personal-scope revalidation and
-byte-identical task/timer files. `tests/passive-attempt-view.cjs` tests the actual
-formatting helper. These are synthetic module/integration checks, not installed
-acceptance. The supplied POST405 implementation is not modified by this package.
-
-Exact prior head `6bd9bd1` failed Actions run39996108969/job120559939443 at
-`tools/verify_separation.py`, before tests/build: the unreleased bundle kind
-accidentally matched the existing credential-format scanner substring. This
-revision renames it to `observation-bundle`; the guard is unchanged. Its original
-JSON/hash changes, so the private partial export must use the corrected kind.
-The source regressions workflow now includes observation, passive adapter,
-report/import and Node helper tests. A Linux check does not imply Windows CI or
-native E2E success. Chromium remains unavailable after the official installer was
-blocked by policy at cdn.playwright.dev; no bypass or Mac fallback is attempted.
+Chromium UI behavior remains unverified: the official cloud installer was blocked
+by network policy at cdn.playwright.dev. No bypass or Mac fallback was attempted.
+Remaining installed acceptance requires the coordinator's verified current-turn
+binding, fresh selected-source read, updated pinned runtime copy and approved
+passive backend/UI check, including POST405 and unchanged task/timer data.

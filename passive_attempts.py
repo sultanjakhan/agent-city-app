@@ -35,6 +35,18 @@ def timestamp(value):
     except ValueError: raise BindingError('invalid_attempt_timestamp') from None
 
 
+def collector_time(value):
+    """Normalize only explicit aware collector times; never first-seen fallback."""
+    if value is None: return None
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|[+-]\d\d:\d\d)', value):
+        raise BindingError('invalid_collector_timestamp')
+    try: parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError: raise BindingError('invalid_collector_timestamp') from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None or parsed > datetime.now(timezone.utc):
+        raise BindingError('invalid_or_future_collector_timestamp')
+    return parsed.astimezone(timezone.utc).isoformat(timespec='microseconds').replace('+00:00', 'Z')
+
+
 def label(value, limit=200):
     if not isinstance(value, str) or not value.strip() or len(value) > limit or any(ord(c) < 32 for c in value):
         raise BindingError('invalid_attempt_label')
@@ -79,6 +91,8 @@ def validate(value):
     native = value['nativeTaskKey']
     if native is not None and (not isinstance(native, str) or not re.fullmatch(r'cicada-[a-f0-9]{16}-[A-Za-z0-9_-]{1,80}', native)):
         raise BindingError('invalid_native_task_key')
+    if native is not None and native[24:] != task['sourceId']:
+        raise BindingError('native_task_source_id_mismatch')
     skills = value['appliedSkills']
     if skills is not None:
         if not isinstance(skills, list) or len(skills) > 20: raise BindingError('attempt_skill_capacity')
@@ -114,12 +128,7 @@ def verify_task(connector, binding):
     matches = [task for task in snapshot.get('tasks', []) if task.get('sourceId') == identity['sourceId'] and task.get('taskKey') == identity['taskKey']]
     if len(matches) != 1: raise BindingError('attempt_task_unavailable')
     task = matches[0]
-    tags = task.get('tags')
-    if isinstance(tags, str): tags = tags.split(',')
-    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
-        raise BindingError('attempt_personal_scope_unavailable')
-    tags = {tag.strip().lower() for tag in tags}
-    if 'task-sphere:personal' not in tags or 'task-sphere:work' in tags or any(t.startswith(('jira', 'investlink')) for t in tags):
+    if task.get('personalEligible') is not True:
         raise BindingError('attempt_personal_task_required')
     return task
 
@@ -138,17 +147,22 @@ def project_session(item, binding, task, digest, *, identity_fields=()):
     matches = [s for s in item.get('stages', []) if isinstance(s, dict) and s.get('id') == binding['turnId']]
     if len(matches) != 1: raise BindingError('exact_turn_unavailable')
     original = matches[0]
-    start, end = original.get('startedAt'), original.get('endedAt')
-    if start is not None: timestamp(start)
-    if end is not None: timestamp(end)
+    start, end = collector_time(original.get('observedStartedAt')), collector_time(original.get('endedAt'))
     if start and end and timestamp(end) < timestamp(start): raise BindingError('invalid_turn_interval')
     usage = original.get('usage') if isinstance(original.get('usage'), dict) else {}
     usage = {key: counter(usage.get(key)) for key in ('input', 'output', 'total', 'cachedInput', 'reasoningOutput')}
     model = original.get('model')
     if model is not None: label(model)
+    effort = original.get('effort')
+    if effort is not None: label(effort)
+    last_event = collector_time(original.get('lastEventAt'))
+    if start and last_event and timestamp(last_event) < timestamp(start):
+        raise BindingError('invalid_turn_event_order')
+    coverage = original.get('coverage')
+    if coverage not in ('complete', 'partial', 'unknown'): coverage = 'unknown'
     status = original.get('status')
-    if status not in ('running', 'active', 'waiting', 'completed', 'stopped', 'cancelled', 'error'): status = 'unknown'
-    if end and status in ('running', 'active', 'waiting'): status = 'unknown'
+    if status not in ('working', 'completed', 'interrupted', 'unknown'): status = 'unknown'
+    if end and status == 'working': raise BindingError('working_turn_has_end')
     duration = counter(original.get('durationMs'))
     skills = binding['appliedSkills']
     applied_events = []
@@ -160,7 +174,7 @@ def project_session(item, binding, task, digest, *, identity_fields=()):
                                'label': 'Skill applied · executor reported', 'skill': event['skill'],
                                'detail': 'Executor reported; not independently verified.', 'source': 'executor-reported'})
     stage = {'id': binding['turnId'], 'name': 'Bound turn', 'status': status,
-             'startedAt': start, 'endedAt': end, 'durationMs': duration, 'model': model,
+             'startedAt': start, 'endedAt': end, 'durationMs': duration, 'durationSource': original.get('durationSource'), 'model': model, 'effort': effort,
              'usage': usage, 'events': applied_events,
              'attemptBinding': {'readOnly': True, 'turnId': binding['turnId'], 'independentlyVerified': False}}
     identity = binding['task']
@@ -178,14 +192,15 @@ def project_session(item, binding, task, digest, *, identity_fields=()):
     row = {key: copy.deepcopy(item[key]) for key in identity_fields if key in item}
     row.update(id=item['id'], name=title, task=summary, result=None, currentAction=None,
                status=status, startedAt=start, endedAt=end, durationMs=duration, usage=usage,
-               model=model, skills=[event['skill'] + ' (executor reported)' for event in skills] if skills is not None else [], stages=[stage])
+               model=model, effort=effort, coverage=coverage, lastEventAt=last_event,
+               durationSource=original.get('durationSource'), skills=[event['skill'] + ' (executor reported)' for event in skills] if skills is not None else [], stages=[stage])
     row['attemptBinding'] = {'kind': 'owner-approved-exact-turn', 'bindingHash': digest,
                              'task': copy.deepcopy(identity), 'nativeTaskKey': native,
                              'turnId': binding['turnId'], 'approvedAt': binding['approvedAt'],
                              'readOnly': True, 'independentlyVerified': False,
                              'skillsKnown': skills is not None, 'usageSource': 'exact-bound-turn-only',
-                             'skillSource': 'executor-reported', 'durationSource': 'collector-reported-duration' if duration is not None else 'unknown',
-                             'runningElapsedSource': 'derived-from-observed-start' if start and not end and status in ('running', 'active', 'waiting') else None}
+                             'skillSource': 'executor-reported', 'durationSource': (original.get('durationSource') or 'collector-reported-duration') if duration is not None else 'unknown',
+                             'runningElapsedSource': 'derived-from-observed-start' if start and not end and status == 'working' else None}
     return row
 
 

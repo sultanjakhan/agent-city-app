@@ -146,29 +146,14 @@ hooks, with synthetic tests. The executor reporting modules are not observation
 import adapters. The standalone schema/validator and display can be reused after
 review; do not copy this server over the installed GET-only server.
 
-To prepare an exact compatible patch, the minimal **read-only source inputs**
-needed from the frozen build are:
-
-1. Its server entry module containing Store initialization, dashboard GET
-   projection and blanket POST-405 handling, plus its existing storage lock/
-   atomic-write and owner-approval mechanism (if separate modules).
-2. Its read-only Cicada connector module: selected profile/source identity,
-   exact-task lookup and personal-scope conventions.
-3. Its LiveSessions collector module and the function that maps collector
-   records into dashboard/session rows; preserve its fields and local provenance.
-4. Its dashboard template and JS renderer (and any required shared DOM helper)
-   at their actual installed revision. A CSS excerpt is needed only if these
-   existing card/dialog classes are absent.
-
-No production database, journal, credentials or private config is needed for
-that source review. The compatible first-import design must retain all POST405:
-use an explicitly owner-approved offline/local import mechanism already allowed
-by that runtime, if one exists, followed only by lightweight GET readback. If
-none exists, a separately reviewed offline import capability is required; this
-candidate does not silently enable one. Mac verification remains: exact native
-personal identity, imported/read-only label and provenance, null gaps, replay and
-restart readback, and unchanged task/timer data. LiveSessions and imported rows
-must remain distinct; session/task links require explicit supplied identity.
+The required frozen interfaces have now been supplied. The final narrow
+LiveSessions splice, exact source anchors, read-only preflight and integration
+steps are in [PASSIVE-ATTEMPT-ADAPTER.md](PASSIVE-ATTEMPT-ADAPTER.md) and
+`compat/frozen-exact-turn.patch`. It uses an owner-authored exact current-turn
+binding file and adds no HTTP write capability. It is separate from the public
+observation-bundle importer. The coordinator retains private binding creation,
+new runtime copy/pins/descriptor, approved restart and installed verification.
+No production data or logs are required to review the patch.
 
 ### Current cloud check limits
 

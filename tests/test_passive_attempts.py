@@ -32,7 +32,7 @@ class PassiveAttemptTests(unittest.TestCase):
                    'task':'OLD THREAD GOAL','result':'OLD RESULT','model':'old-session-model','usage':{'total':99999},
                    'tokens':99999,'skills':['read-only-skill'],'stages':[
                        {'id':'past-turn','usage':{'total':88888},'model':'past-model'},
-                       {'id':'current-turn','startedAt':AT,'endedAt':None,'durationMs':None,'status':'running',
+                       {'id':'current-turn','startedAt':AT,'observedStartedAt':AT,'endedAt':None,'durationMs':None,'status':'working',
                         'usage':{'input':7,'output':None,'total':None},'events':[{'id':'read-event','kind':'read','skill':'read-only-skill','detail':'must-not-be-copied'}]}]},
                        {'id':'unrelated-session','usage':{'total':42},'stages':[]}]}
         data=self.data
@@ -59,6 +59,36 @@ class PassiveAttemptTests(unittest.TestCase):
         self.assertEqual('OLD THREAD GOAL',self.data['sessions'][0]['task'])
         self.assertEqual(self.before,self.db.read_bytes())
         self.assertEqual(self.wrapper.snapshot(),result)
+
+    def test_per_turn_model_effort_optional_counters_and_no_first_seen_start_fallback(self):
+        self.save();stage=self.data['sessions'][0]['stages'][1]
+        stage.update(model='synthetic-turn-model',effort='synthetic-effort',lastEventAt=AT,coverage='partial')
+        stage['usage'].update(cachedInput=2,reasoningOutput=3)
+        row=self.wrapper.snapshot()['sessions'][0]
+        self.assertEqual(('synthetic-turn-model','synthetic-effort'),(row['model'],row['effort']))
+        self.assertEqual((2,3),(row['usage']['cachedInput'],row['usage']['reasoningOutput']))
+        self.assertEqual('2026-01-01T10:00:00.000000Z',row['lastEventAt'])
+        stage['observedStartedAt']=None
+        row=self.wrapper.snapshot()['sessions'][0]
+        self.assertIsNone(row['startedAt']);self.assertIsNone(row['attemptBinding']['runningElapsedSource'])
+
+    def test_native_offset_times_working_status_scope_and_suffix_guards(self):
+        from datetime import datetime, timedelta, timezone
+        self.save();stage=self.data['sessions'][0]['stages'][1]
+        stage.update(observedStartedAt='2026-01-01T10:00:00.000+00:00', lastEventAt='2026-01-01T10:00:01.000+00:00')
+        row=self.wrapper.snapshot()['sessions'][0]
+        self.assertEqual('working',row['status'])
+        self.assertEqual('2026-01-01T10:00:00.000000Z',row['startedAt'])
+        for bad in ('2026-01-01T10:00:00', 'bad', (datetime.now(timezone.utc)+timedelta(days=1)).isoformat()):
+            stage['observedStartedAt']=bad
+            self.assertEqual('unavailable',self.wrapper.snapshot()['attemptBinding']['status'])
+        stage['observedStartedAt']='2026-01-01T10:00:02+00:00'
+        self.assertEqual('unavailable',self.wrapper.snapshot()['attemptBinding']['status'])
+        for tags in ('TASK-SPHERE:PERSONAL', 'task-sphere:personal,TASK-SPHERE:WORK', 'task-sphere:personal,JIRA:issue'):
+            with closing(sqlite3.connect(self.db)) as db,db:db.execute('UPDATE items SET tags=?',(tags,))
+            self.assertIs(self.connector.snapshot(task_keys=[self.task['taskKey']])['tasks'][0]['personalEligible'],False)
+        changed=copy.deepcopy(self.binding);changed['nativeTaskKey']='cicada-'+'f'*16+'-another-source'
+        with self.assertRaises(BindingError):validate(changed)
 
     def test_explicit_application_is_executor_reported_never_a_read(self):
         self.binding['appliedSkills']=[{'id':'synthetic-applied','turnId':'current-turn','skill':'Synthetic skill','at':AT,'kind':'applied','source':'executor-reported'}]
