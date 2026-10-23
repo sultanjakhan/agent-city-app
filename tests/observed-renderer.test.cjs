@@ -64,3 +64,26 @@ test('actual assembled bundle boots once in passive host and never fetches a new
  for(const cb of listeners['agentcity:live-summary'])cb({detail:{source:{status:'unavailable'},sessions:[]}});
  assert.equal(doc.querySelectorAll('.observed-work').length,1);
 });
+
+
+test('main occupies the sole grid track until a detail selection exists on every page',()=>{
+ const h=setup();h.ui.update(feed([session('one')]));const layout=by(h.root,'ow-layout');
+ for(const page of ['home','projects','history']){h.ui.navigate({page});assert.equal(layout.className.includes('ow-detail-selected'),false);assert.equal(by(h.root,'ow-detail').hidden,true);}
+ h.ui.navigate({page:'home',sessionId:'one'});assert.equal(layout.className.includes('ow-detail-selected'),true);
+ h.ui.update(feed([]));assert.equal(layout.className.includes('ow-detail-selected'),true); // Selected unavailable detail stays open.
+ h.ui.navigate({page:'home'});assert.equal(layout.className.includes('ow-detail-selected'),false);
+ const css=require('node:fs').readFileSync(require('node:path').join(__dirname,'../static/observed-work.css'),'utf8');
+ assert.match(css,/\.ow-layout \{[^}]*grid-template-columns:minmax\(0,1fr\)/);
+ assert.match(css,/@media\(max-width:800px\) \{ \.ow-layout\.ow-detail-selected \{ grid-template-columns:minmax\(0,1fr\)/);
+});
+test('only explicit different-session selection focuses heading and reveals it when outside visible bounds',()=>{
+ const h=setup();h.ui.update(feed([session('one'),session('two')]));const detail=by(h.root,'ow-detail'),heading=detail.querySelector('h3');heading.getBoundingClientRect=()=>({top:1200,bottom:1240});
+ let rows=h.root.querySelectorAll('.ow-session');rows[0].click();assert.equal(h.doc.activeElement,heading);assert.deepEqual(heading.focusCalls,[{preventScroll:true}]);assert.equal(heading.scrollCalls.length,1);assert.equal(heading.tabIndex,-1);
+ const disclosure=detail.querySelector('summary');disclosure.focus();disclosure.parentElement.open=true;h.root.scrollTop=370;
+ h.ui.update(feed([session('one',{usage:{total:7}}),session('two')]));rows[0].click();
+ assert.equal(h.doc.activeElement,disclosure);assert.equal(heading.scrollCalls.length,1);assert.equal(heading.focusCalls.length,1);assert.equal(h.root.scrollTop,370);
+ heading.getBoundingClientRect=()=>({top:150,bottom:190});rows[1].click();assert.equal(h.doc.activeElement,heading);assert.equal(heading.focusCalls.length,2);assert.equal(heading.scrollCalls.length,1);
+ // A clipped native main scroll container also requires reveal even within viewport.
+ h.root.clientHeight=100;h.root.scrollHeight=1200;h.root.getBoundingClientRect=()=>({top:0,bottom:100});rows[0].click();assert.equal(heading.scrollCalls.length,2);
+ h.ui.update(feed([session('one',{status:'completed'}),session('two')]));assert.equal(heading.scrollCalls.length,2);assert.equal(heading.focusCalls.length,3);assert.equal(h.ui.model.route.sessionId,'one');
+});

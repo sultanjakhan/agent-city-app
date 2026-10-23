@@ -11,7 +11,8 @@
 .ow-nav [aria-current=page],.ow-tabs [aria-selected=true] { background:var(--soft,#f7f7f7); font-weight:650; }
 .ow-freshness,.ow-secondary { color:var(--secondary,#606060); font-size:13px; }
 .ow-freshness { margin:12px 0 20px; font-variant-numeric:tabular-nums; }
-.ow-layout { display:grid; grid-template-columns:minmax(240px,1fr) minmax(0,1.6fr); gap:24px; align-items:start; }
+.ow-layout { display:grid; grid-template-columns:minmax(0,1fr); gap:24px; align-items:start; }
+.ow-layout.ow-detail-selected { grid-template-columns:minmax(240px,1fr) minmax(0,1.6fr); }
 .ow-main,.ow-detail { min-width:0; }
 .ow-main h2,.ow-detail h3 { font-size:20px; line-height:1.3; margin:0 0 12px; overflow-wrap:anywhere; }
 .ow-filter { width:100%; margin-bottom:12px; }
@@ -44,7 +45,7 @@
 .ow-events li { display:grid; grid-template-columns:110px minmax(0,1fr); gap:12px; padding:10px 0; border-bottom:1px solid var(--subtle,#ebebeb); }
 .ow-events time { color:var(--secondary,#606060); font-variant-numeric:tabular-nums; }
 .ow-events span,.ow-detail p { overflow-wrap:anywhere; }
-@media(max-width:800px) { .ow-layout { grid-template-columns:minmax(0,1fr); } .ow-detail { border-top:1px solid var(--line,#dedede); padding-top:20px; } }
+@media(max-width:800px) { .ow-layout.ow-detail-selected { grid-template-columns:minmax(0,1fr); } .ow-detail { border-top:1px solid var(--line,#dedede); padding-top:20px; } }
 @media(max-width:480px) { .ow-metrics { grid-template-columns:minmax(0,1fr); gap:12px; } .ow-metrics>div { display:grid; grid-template-columns:80px minmax(0,1fr); gap:4px 12px; } .ow-metrics dd { margin:0; } .ow-metrics p { grid-column:2; } .ow-session { grid-template-columns:minmax(0,1fr); } .ow-events li { grid-template-columns:90px minmax(0,1fr); gap:8px; } }
 .app-header [data-observed-page] { min-height:42px; padding:10px 12px; border:0; border-radius:5px; background:transparent; color:var(--secondary,#606060); text-align:left; }
 .app-header [data-observed-page][aria-current=page] { color:var(--ink,#252525); font-weight:650; background:var(--soft,#f7f7f7); }

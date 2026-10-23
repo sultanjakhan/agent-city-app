@@ -99,11 +99,20 @@
   function patchTabs(){activityPanel.hidden=tab!=='activity';taskPanel.hidden=tab!=='task';for(const [key,n] of Object.entries(tabButtons)){n.setAttribute('aria-selected',String(key===tab));n.tabIndex=key===tab?0:-1;}}
   function remember(){if(selectedId)sessionState.set(selectedId,{tab,usage:usage.node.open,identity:identity.node.open,diagnostics:diagnostics.node.open});}
   const detailsBody=node('div');detailsBody.append(detailTitle,detailStatus,summary,start,usage.node,skillArea,tabs,activityPanel,taskPanel,diagnostics.node);detail.append(crumb,unavailable,detailsBody);layout.append(main,detail);shell.append(nav,fresh,layout);container.append(shell);
-  function navigate(r){remember();model.navigate(r);patch();onRoute(model.route);}
+  detailTitle.tabIndex=-1;
+  function navigate(r){
+   const previous=model.route.sessionId;remember();model.navigate(r);patch();onRoute(model.route);
+   if(!r.sessionId||r.sessionId===previous||model.selected?.id!==r.sessionId)return;
+   detailTitle.focus({preventScroll:true});
+   const rect=detailTitle.getBoundingClientRect(),viewport=doc.defaultView?.innerHeight||doc.documentElement.clientHeight;
+   let top=0,bottom=viewport;
+   for(let n=detailTitle.parentElement;n;n=n.parentElement)if(n.clientHeight>0&&n.scrollHeight>n.clientHeight){const bounds=n.getBoundingClientRect();top=Math.max(top,bounds.top);bottom=Math.min(bottom,bounds.bottom);}
+   if(rect.top<top||rect.bottom>bottom)detailTitle.scrollIntoView({block:'start',inline:'nearest',behavior:'auto'});
+  }
   function facts(parent,values){list(parent,values,x=>x[0],()=>{const n=node('div'),k=node('dt'),v=node('dd');n.append(k,v);n._k=k;n._v=v;return n;},(n,[k,v])=>{put(n._k,k);put(n._v,v??'Неизвестно');});}
   function eventRows(parent,items){list(parent,items,x=>x.id,()=>{const n=node('li'),at=node('time'),label=node('span');n.append(at,label);n._at=at;n._label=label;return n;},(n,e)=>{put(n._at,e.at?new Date(e.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'Время неизвестно');if(e.at)n._at.setAttribute('datetime',e.at);else n._at.removeAttribute('datetime');put(n._label,e.label);});}
   function patchDetail(){
-   const r=model.route,s=model.selected;detail.hidden=!r.sessionId;unavailable.hidden=!!s;detailsBody.hidden=!s;crumb.hidden=!s;if(!s)return;
+   const r=model.route,s=model.selected;layout.classList.toggle('ow-detail-selected',Boolean(r.sessionId));detail.hidden=!r.sessionId;unavailable.hidden=!!s;detailsBody.hidden=!s;crumb.hidden=!s;if(!s)return;
    if(selectedId!==s.id){remember();selectedId=s.id;const saved=sessionState.get(s.id)||{};tab=saved.tab||'activity';usage.node.open=!!saved.usage;identity.node.open=!!saved.identity;diagnostics.node.open=!!saved.diagnostics;}
    const project=model.data.projects.find(p=>p.id===s.projectId),agent=model.data.agents.find(a=>a.id===s.agentId);
    put(crumbs.project,project?.name||'Проект неизвестен');put(crumbs.agent,agent?.name||'Агент неизвестен');crumbs.agent.disabled=!s.agentId;put(crumbs.session,s.scope.kind==='turn'?'Текущий ход':'Сессия');
