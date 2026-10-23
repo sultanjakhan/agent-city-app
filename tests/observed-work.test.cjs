@@ -49,3 +49,14 @@ test('cached bridge subscribes and disconnects, no second transport/polling or n
  const seen=[],data=raw();let callback,removed=false;const connection=F.connect({update:s=>seen.push(s)},{read:()=>data,subscribe:cb=>{callback=cb;return ()=>removed=true;}});
  assert.equal(seen.length,1);callback(data);connection.refresh();assert.equal(seen.length,3);connection.disconnect();assert.equal(removed,true);
 });
+
+test('Projects landing → project → agent excludes finished/global rows while retaining unknown observations and selected finished detail',()=>{
+ const current=session('current'),unknown=session('unknown',{status:'unknown',agentId:'agent-b'}),finished=session('finished',{status:'completed'}),other=session('other',{projectId:'project-b'});
+ const m=V.createModel({page:'projects'}).update(feed([current,unknown,finished,other]));
+ assert.deepEqual(m.rows(),[]);assert.deepEqual(m.projectAgents(null),[]);
+ m.navigate({page:'projects',projectId:'project-a'});assert.deepEqual(m.rows().map(s=>s.id),['current','unknown']);assert.deepEqual(m.projectAgents('project-a').map(a=>a.id),['agent-a']);
+ m.navigate({page:'projects',projectId:'project-a',agentId:'agent-a',sessionId:'current'});assert.deepEqual(m.rows().map(s=>s.id),['current']);
+ m.update(feed([{...current,status:'completed'},unknown,finished,other]));assert.deepEqual(m.rows(),[]);assert.equal(m.selected.id,'current');assert.equal(m.selected.status,'completed');assert.equal(m.route.sessionId,'current');
+ m.navigate({page:'projects',projectId:'project-a',agentId:'agent-b'});assert.deepEqual(m.rows().map(s=>s.id),['unknown']);assert.equal(m.rows()[0].status,'unknown');
+ m.navigate({page:'history',projectId:'project-a'});assert.deepEqual(m.rows().map(s=>s.id),['current','finished']);
+});
