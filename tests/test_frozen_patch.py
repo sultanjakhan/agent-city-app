@@ -1,4 +1,8 @@
 """Assemble complete files from exact frozen substrings; execute changed paths."""
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
+from urllib.request import urlopen, Request
+from urllib.error import HTTPError
 import json
 from pathlib import Path
 import subprocess
@@ -17,7 +21,7 @@ class FrozenPatchTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name)
         self.app=self.root/'native/agent-system/app';(self.app/'static').mkdir(parents=True)
-        (self.root/'passive_server.py').write_text('def build_store(value, store):\n'+PASSIVE_ASSIGNMENT+'    return store\n', encoding='utf-8')
+        (self.root/'passive_server.py').write_text('def build_store(value, store):\n'+PASSIVE_ASSIGNMENT+'    return store\n', encoding='utf-8', newline='\n')
         collector="""from datetime import datetime
 class Collector:
     def stage(self, turn, measured):
@@ -27,17 +31,18 @@ class Collector:
             if duration is None and turn['start'] and turn['end']:
                 duration = max(0, round((datetime.fromisoformat(turn['end']) - datetime.fromisoformat(turn['start'])).total_seconds() * 1000))
 """+STAGE_RETURN+'        return stages[0]\n'
-        (self.app/'live_sessions.py').write_text(collector, encoding='utf-8')
+        (self.app/'live_sessions.py').write_text(collector, encoding='utf-8', newline='\n')
         connector='class Connector:\n    def view(self, rows):\n        if True:\n'+CONNECTOR_INIT+"            for ident, tags in rows:\n"+CONNECTOR_TOKS+"                result.append({'sourceId':str(ident)})\n"+CONNECTOR_RETURN
-        (self.app/'cicada_connector.py').write_text(connector, encoding='utf-8')
+        (self.app/'cicada_connector.py').write_text(connector, encoding='utf-8', newline='\n')
         renderer='// Synthetic UTF-8 marker: 雲\n'+PATCH_METRICS+'\n  function updateStageNode(stage, summary, stageDuration) {\n'+STAGE_METRICS+'  }\n'
-        (self.app/'static/live-sessions.js').write_text(renderer, encoding='utf-8')
+        (self.app/'static/live-sessions.js').write_text(renderer, encoding='utf-8', newline='\n')
         self.html='<!doctype html><html><body>'+LIVE_SCRIPT+'<script src="/app.js" defer></script></body></html>'
-        (self.app/'static/index.html').write_text(self.html, encoding='utf-8')
+        (self.app/'static/index.html').write_text(self.html, encoding='utf-8', newline='\n')
         self.assertIn(r'\u00b7', renderer)
         self.assertNotIn(' · ', PATCH_METRICS)
         patch=(ROOT/'compat/frozen-exact-turn.patch').read_text(encoding='utf-8')
         self.assertEqual(patch_text(ROOT),patch)
+        self.assertNotIn(b'\r\n',(self.root/'passive_server.py').read_bytes())
         expected=check_sources(self.root,ROOT)
         before={path:path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
         result=subprocess.run([sys.executable,'-X','warn_default_encoding','-W','error::EncodingWarning','-m','compat.frozen_patch','--check-root',str(self.root),'--planned-files-json'],cwd=ROOT,capture_output=True,text=True,encoding='utf-8',check=True)
@@ -50,12 +55,12 @@ class Collector:
         for name,content in expected.items():self.assertEqual(content,(self.root/name).read_text(encoding='utf-8'))
 
     def test_missing_or_duplicate_anchor_rejected_without_writes(self):
-        for name in ('passive_attempts.py','static/passive-attempt-view.js'):(self.app/name).unlink()
+        (self.app/'passive_attempts.py').unlink()
         for path,content in self.original_files.items():path.write_bytes(content)
         path=self.app/'static/live-sessions.js'
         original=path.read_bytes()
         for text in ('missing anchor', original.decode()+PATCH_METRICS):
-            path.write_text(text, encoding='utf-8')
+            path.write_text(text, encoding='utf-8', newline='\n')
             before=path.read_bytes()
             with self.assertRaisesRegex(ValueError,'anchor absent or ambiguous'):
                 check_sources(self.root,ROOT)
@@ -88,25 +93,52 @@ class Collector:
         self.assertIn("identity_fields=('projectId', 'agentId', 'parentId')",entry)
         self.assertNotIn('do_POST',entry)
         html=(self.app/'static/index.html').read_text(encoding='utf-8')
-        self.assertEqual(self.html.replace(LIVE_SCRIPT,'<script src="/passive-attempt-view.js" defer></script>'+LIVE_SCRIPT),html)
+        self.assertEqual(self.html,html)
+        self.assertFalse((self.app/'static/passive-attempt-view.js').exists())
         self.assertNotIn('\n',html)
         self.assertEqual((ROOT/'passive_attempts.py').read_text(encoding='utf-8'),(self.app/'passive_attempts.py').read_text(encoding='utf-8'))
 
-    def test_applied_exact_patchMetrics_executes_helper_and_leaves_unbound_path(self):
+    def test_allowlisted_renderer_serves_embedded_helper_and_executes_bound_and_unbound_paths(self):
         script=r"""
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
-const dir=process.argv[1],nodes={};
+const nodes={};
 const metricNode=k=>nodes[k]??={v:{},n:{},querySelector:s=>s==='.ls-metric-value'?nodes[k].v:nodes[k].n};
 const scope={metricNode,formatDuration:String,formatNumber:String,text:String,formatDateTime:String,sessionDuration:()=>99999};
-vm.runInNewContext(fs.readFileSync(path.join(dir,'passive-attempt-view.js'),'utf8'),scope);
-vm.runInNewContext(fs.readFileSync(path.join(dir,'live-sessions.js'),'utf8'),scope);
+vm.runInNewContext(fs.readFileSync(0,'utf8'),scope);
 scope.patchMetrics({attemptBinding:{},status:'completed',startedAt:'2026-01-01T10:00:00Z',endedAt:'2026-01-01T10:01:00Z',durationMs:null,model:null,effort:null,usage:{input:7,output:null,total:null}});
 const bound=JSON.parse(JSON.stringify(nodes));
 scope.patchMetrics({startedAt:'legacy',model:'session-model',effort:'legacy-effort',usage:{total:88888}});
-console.log(JSON.stringify({bound,unbound:nodes}));
+const stageValue={};
+scope.updateStageNode({attemptBinding:{},status:'completed',durationMs:null,usage:{total:null}}, {querySelector:()=>stageValue}, 99999);
+console.log(JSON.stringify({bound,unbound:nodes,stage:stageValue.textContent}));
 """
-        result=subprocess.run(['node','-e',script,str(self.app/'static')],capture_output=True,text=True,encoding='utf-8',check=True)
+        renderer=(self.app/'static/live-sessions.js').read_bytes()
+        # Synthetic frozen-style allowlist: only the existing asset resolves.
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_GET(self):
+                if self.path != '/live-sessions.js':
+                    self.send_error(404); return
+                self.send_response(200); self.send_header('Content-Type','text/javascript; charset=utf-8')
+                self.end_headers(); self.wfile.write(renderer)
+            def do_POST(self): self.send_error(405)
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        thread=Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            base='http://127.0.0.1:'+str(server.server_port)
+            with urlopen(base+'/live-sessions.js') as response:
+                self.assertEqual(200,response.status); served=response.read().decode('utf-8')
+            for request, status in ((base+'/passive-attempt-view.js',404),
+                                    (Request(base+'/anything',data=b'{}',method='POST'),405)):
+                with self.assertRaises(HTTPError) as error: urlopen(request)
+                self.assertEqual(status,error.exception.code)
+            result=subprocess.run(['node','-e',script],input=served,capture_output=True,text=True,encoding='utf-8',check=True)
+        finally:
+            server.shutdown();server.server_close();thread.join()
+
         output=json.loads(result.stdout)
+        self.assertIn('duration unknown',output['stage'])
+        self.assertNotIn('99999',output['stage'])
         self.assertEqual('Unknown',output['bound']['time']['v']['textContent'])
         self.assertEqual('Unknown',output['bound']['tokens']['v']['textContent'])
         self.assertEqual('Unknown',output['bound']['model']['v']['textContent'])

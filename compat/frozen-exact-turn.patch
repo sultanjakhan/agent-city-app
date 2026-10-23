@@ -43,26 +43,7 @@
 +            return [dict(task, personalEligible=personal_eligibility[task['sourceId']]) for task in result[:500]], len(result) > 500
 --- a/native/agent-system/app/static/live-sessions.js
 +++ b/native/agent-system/app/static/live-sessions.js
-@@ -1,4 +1,5 @@
-   function patchMetrics(item) {
-+    if (globalThis.PassiveAttemptView.patchMetrics(item, metricNode, formatNumber, formatDuration, text, formatDateTime)) return;
-     const usage = item.usage || {};
-     const time = metricNode('time'); time.querySelector('.ls-metric-value').textContent = formatDuration(sessionDuration(item));
-     time.querySelector('.ls-metric-note').textContent = `Started ${formatDateTime(item.startedAt)}`;
---- a/native/agent-system/app/static/live-sessions.js
-+++ b/native/agent-system/app/static/live-sessions.js
-@@ -1 +1,4 @@
--    summary.querySelector('.ls-stage-metrics').textContent = `${formatNumber(stage.usage?.total)} tokens · ${formatDuration(stageDuration)}`;
-+    const scopedMetrics = globalThis.PassiveAttemptView.stageMetrics(stage, formatNumber, formatDuration);
-+    summary.querySelector('.ls-stage-metrics').textContent = scopedMetrics !== null
-+      ? scopedMetrics
-+      : `${formatNumber(stage.usage?.total)} tokens · ${formatDuration(stageDuration)}`;
---- a/native/agent-system/app/static/index.html
-+++ b/native/agent-system/app/static/index.html
-@@ -1 +1 @@
--<script src="/live-sessions.js" defer></script>+<script src="/passive-attempt-view.js" defer></script><script src="/live-sessions.js" defer></script>--- /dev/null
-+++ b/native/agent-system/app/static/passive-attempt-view.js
-@@ -0,0 +1,31 @@
+@@ -1,4 +1,37 @@
 +'use strict';
 +// Embedded into the frozen renderer by the exact integration patch; no DOM rebuild.
 +(function(root){
@@ -94,6 +75,20 @@
 + }
 + root.PassiveAttemptView=Object.freeze({stageTiming,stageMetrics,patchMetrics});
 +})(globalThis);
++
+   function patchMetrics(item) {
++    if (globalThis.PassiveAttemptView.patchMetrics(item, metricNode, formatNumber, formatDuration, text, formatDateTime)) return;
+     const usage = item.usage || {};
+     const time = metricNode('time'); time.querySelector('.ls-metric-value').textContent = formatDuration(sessionDuration(item));
+     time.querySelector('.ls-metric-note').textContent = `Started ${formatDateTime(item.startedAt)}`;
+--- a/native/agent-system/app/static/live-sessions.js
++++ b/native/agent-system/app/static/live-sessions.js
+@@ -1 +1,4 @@
+-    summary.querySelector('.ls-stage-metrics').textContent = `${formatNumber(stage.usage?.total)} tokens · ${formatDuration(stageDuration)}`;
++    const scopedMetrics = globalThis.PassiveAttemptView.stageMetrics(stage, formatNumber, formatDuration);
++    summary.querySelector('.ls-stage-metrics').textContent = scopedMetrics !== null
++      ? scopedMetrics
++      : `${formatNumber(stage.usage?.total)} tokens · ${formatDuration(stageDuration)}`;
 --- /dev/null
 +++ b/native/agent-system/app/passive_attempts.py
 @@ -0,0 +1,237 @@

@@ -1,7 +1,7 @@
 """Read-only exact-substring assembly of complete frozen source files; no installer."""
 import difflib
 from pathlib import Path
-from compat.frozen_fragments import PASSIVE_ASSIGNMENT, STAGE_RETURN, PATCH_METRICS, STAGE_METRICS, CONNECTOR_INIT, CONNECTOR_TOKS, CONNECTOR_RETURN, LIVE_SCRIPT
+from compat.frozen_fragments import PASSIVE_ASSIGNMENT, STAGE_RETURN, PATCH_METRICS, STAGE_METRICS, CONNECTOR_INIT, CONNECTOR_TOKS, CONNECTOR_RETURN
 
 
 def changes(root):
@@ -37,10 +37,8 @@ def changes(root):
             (connector, CONNECTOR_INIT, CONNECTOR_INIT + '            personal_eligibility = {}\n'),
             (connector, CONNECTOR_TOKS, CONNECTOR_TOKS + "                personal_eligibility[str(ident)] = ('task-sphere:personal' in toks and not any(\n                    tok.lower() == 'task-sphere:work' or tok.lower().startswith(('jira', 'investlink')) for tok in toks))\n"),
             (connector, CONNECTOR_RETURN, "            return [dict(task, personalEligible=personal_eligibility[task['sourceId']]) for task in result[:500]], len(result) > 500\n"),
-            ('native/agent-system/app/static/live-sessions.js', PATCH_METRICS, metrics),
+            ('native/agent-system/app/static/live-sessions.js', PATCH_METRICS, helper + '\n' + metrics),
             ('native/agent-system/app/static/live-sessions.js', STAGE_METRICS, stage_metrics),
-            ('native/agent-system/app/static/index.html', LIVE_SCRIPT, '<script src="/passive-attempt-view.js" defer></script>' + LIVE_SCRIPT),
-            ('native/agent-system/app/static/passive-attempt-view.js', '', helper),
             ('native/agent-system/app/passive_attempts.py', '', (Path(root)/'passive_attempts.py').read_text(encoding='utf-8'))]
 
 
