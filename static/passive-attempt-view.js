@@ -13,7 +13,7 @@
  function stageMetrics(stage,formatNumber,formatDuration,now=Date.now()){
   const timing=stageTiming(stage,now);if(!timing)return null;
   const tokens=stage.usage?.total;
-  return `${known(tokens)?formatNumber(tokens):'Unknown'} tokens · ${timing.value===null?'Unknown':formatDuration(timing.value)} · ${timing.label}`;
+  return `${known(tokens)?formatNumber(tokens):'Unknown'} tokens · ${timing.value===null?'Unknown':formatDuration(timing.value)}`;
  }
  function patchMetrics(item,metricNode,formatNumber,formatDuration,text,formatDateTime,now=Date.now()){
   const timing=stageTiming(item,now);if(!timing)return false;

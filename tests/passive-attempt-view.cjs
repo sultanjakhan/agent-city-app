@@ -3,11 +3,16 @@ const scope={};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../static
 const view=scope.PassiveAttemptView,now=Date.parse('2026-01-01T10:01:00Z');
 test('bound running elapsed is labelled and completed unknown duration is never synthesized',()=>{
  const stage={attemptBinding:{readOnly:true},status:'working',startedAt:'2026-01-01T10:00:00Z',endedAt:null,durationMs:null,usage:{total:null}};
- assert.match(view.stageMetrics(stage,String,String,now),/Unknown tokens.*60000.*running elapsed.*not completed duration/);
+ assert.equal(view.stageMetrics(stage,String,String,now),'Unknown tokens · 60000');
+ assert.match(view.stageTiming(stage,now).label,/running elapsed.*not completed duration/);
  stage.status='completed';stage.endedAt='2026-01-01T10:01:00Z';
  assert.equal(view.stageTiming(stage,now).value,null);
- assert.match(view.stageMetrics(stage,String,String,now),/Unknown.*duration unknown/);
- stage.durationMs=321;assert.match(view.stageMetrics(stage,String,String,now),/321.*collector-reported duration/);
+ assert.equal(view.stageMetrics(stage,String,String,now),'Unknown tokens · Unknown');
+ assert.equal(view.stageTiming(stage,now).label,'duration unknown');
+ stage.durationMs=321;assert.equal(view.stageMetrics(stage,String,String,now),'Unknown tokens · 321');
+ assert.equal(view.stageTiming(stage,now).label,'collector-reported duration');
+ stage.usage.total=0;assert.equal(view.stageMetrics(stage,String,String,now),'0 tokens · 321');
+ stage.durationMs=0;assert.equal(view.stageMetrics(stage,String,String,now),'0 tokens · 0');
  assert.equal(view.stageTiming({durationMs:999},now),null);
 });
 test('patchMetrics uses the bound row only and preserves unbound rendering path',()=>{

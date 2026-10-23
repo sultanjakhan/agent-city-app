@@ -137,7 +137,7 @@ console.log(JSON.stringify({bound,unbound:nodes,stage:stageValue.textContent}));
             server.shutdown();server.server_close();thread.join()
 
         output=json.loads(result.stdout)
-        self.assertIn('duration unknown',output['stage'])
+        self.assertEqual('Unknown tokens · Unknown',output['stage'])
         self.assertNotIn('99999',output['stage'])
         self.assertEqual('Unknown',output['bound']['time']['v']['textContent'])
         self.assertEqual('Unknown',output['bound']['tokens']['v']['textContent'])
