@@ -15,7 +15,7 @@ test('authoritative identity isolates same-name tasks, full bound identities and
 });
 test('attention precedes current once, only explicit unresolved latest user requests survive age',()=>{
  const a=task('a',{isActive:true}),b=task('b'),c=task('c'),m=model();m.update(snapshot([a,b,c],[run(a,{status:'waiting',reasonCode:'approval',updatedAt:old}),run(b,{status:'waiting',reasonCode:'dependency',updatedAt:old}),run(c,{status:'waiting',reasonCode:'user_input',updatedAt:old})]));
- assert.equal(m.rows().length,2);assert.ok(m.rows().every(t=>t.attention));assert.equal(m.get(T.key(binding(a))).requestOld,true);
+ assert.equal(m.rows().length,2);assert.ok(m.rows().every(t=>t.attention));assert.equal(m.get(T.key(binding(a))).requests[0].old,true);
  m.update(snapshot([a,b,c],[run(a,{sequence:2,status:'done'}),run(a,{status:'waiting',reasonCode:'approval'}),run(c,{sequence:2,status:'error',reasonCode:'verification'})]));assert.deepEqual(m.rows().map(t=>t.identity.sourceId),['a']);assert.equal(m.rows()[0].attention,false);
  for(const reason of ['access','quota','connection','execution','verification',null]){const x=model();x.update(snapshot([b],[run(b,{status:'waiting',reasonCode:reason})]));assert.equal(x.rows()[0].attention,false);}
 });
@@ -83,4 +83,29 @@ test('compact work rows omit missing boilerplate; executions use supplied labels
  ui.update(observed([execution('opaque-technical-observation-id',a)]));row=root.querySelector('.ow-task-row');assert.match(row.textContent,/Наблюдаемое выполнение/);assert.match(row.textContent,/Явный проект/);row.click();const detail=root.querySelector('.ow-task-detail'),link=detail.querySelector('.ow-task-execution');assert.equal(link.textContent,'Агент · Session 1 · Работает');assert.doesNotMatch(link.textContent,/opaque/);assert.match(detail.querySelector('details').textContent,/opaque-technical-observation-id/);
  const context='<b>Подтвердить предложенный шаг</b> https://example.invalid/reference';ui.updateTasks(snapshot([a],[run(a,{status:'waiting',reasonCode:'approval',result:{summary:context}})]));assert.match(detail.textContent,/Сообщённый контекст:/);assert.ok(detail.textContent.includes(context));assert.equal(detail.querySelectorAll('a').length,0);assert.equal(detail.querySelectorAll('b').length,0);
  ui.updateTasks(snapshot([a],[run(a,{sequence:2,status:'waiting',reasonCode:'user_input',stage:'Предоставить параметр'})]));assert.match(detail.textContent,/Сообщённый контекст: Предоставить параметр/);assert.doesNotMatch(detail.textContent,/Подтвердить предложенный шаг/);
+});
+test('uncertain technical feeds retain last-known rows without a current execution claim; fresh independent bases take precedence',()=>{
+ const a=task('uncertain'),m=model();m.update(snapshot([a]));
+ for(const status of ['unavailable','stale','partial','unknown']){
+  m.observe({...observed([execution('cached',a)]),source:{status}});const row=m.rows()[0];assert.equal(row.currentBasis,'last-known');assert.equal(row.live.length,0);assert.equal(row.stale,true);assert.equal(row.sessionCount,null);
+  m.update(snapshot([{...a,isActive:true}]));assert.equal(m.rows()[0].currentBasis,'timer');assert.equal(m.rows()[0].stale,false);
+  m.update(snapshot([a],[run(a,{runId:status})]));assert.equal(m.rows()[0].currentBasis,'report');assert.equal(m.rows()[0].stale,false);
+  m.update(snapshot([a],[run(a,{runId:status,sequence:2,status:'done'})]));
+ }
+ m.observe(observed([execution('cached',a)]));assert.equal(m.rows()[0].currentBasis,'observed');assert.equal(m.rows()[0].sessionCount,1);
+});
+test('Home session detail freshness follows technical source; cached execution labels are qualified without disrupting selection',()=>{
+ const doc=D.document(),root=doc.createElement('div');doc.body.append(root);const ui=V.mount(root,{taskHome:T,now:()=>now}),a=task('technical');ui.update(observed([execution('cached',a)]));ui.updateTasks(snapshot([a]));root.querySelector('.ow-task-row').click();
+ const detail=root.querySelector('.ow-task-detail'),heading=detail.querySelector('h3');heading.focus();root.scrollTop=91;
+ ui.update({...observed([execution('cached',a)]),source:{status:'unavailable'}});assert.equal(doc.activeElement,heading);assert.equal(root.scrollTop,91);assert.match(root.querySelector('.ow-task-row').textContent,/Последнее наблюдаемое выполнение · не подтверждено/);assert.match(detail.querySelector('.ow-task-execution').textContent,/Последнее состояние/);assert.match(detail.textContent,/Последнее наблюдаемое выполнение не подтверждено/);
+ detail.querySelector('.ow-task-execution').click();const label=root.querySelector('.ow-freshness').querySelector('summary');assert.equal(label.textContent,'Источник недоступен');ui.updateTasks(snapshot([a]));assert.equal(label.textContent,'Источник недоступен');root.querySelector('.ow-back').click();assert.match(label.textContent,/Синтетический источник · прочитано/);
+});
+test('retained absent-task attention is visibly last-known and request age is evaluated independently',()=>{
+ const doc=D.document(),root=doc.createElement('div');doc.body.append(root);const ui=V.mount(root,{taskHome:T,now:()=>now}),a=task('requests');const reports=[run(a,{runId:'old',status:'waiting',reasonCode:'approval',updatedAt:old}),run(a,{runId:'fresh',status:'waiting',reasonCode:'user_input'})];ui.updateTasks(snapshot([a],reports));root.querySelector('.ow-task-row').click();
+ const requests=root.querySelector('.ow-task-requests');assert.equal(requests.children.length,2);assert.match(requests.children[0].textContent,/давность отчёта требует проверки/);assert.doesNotMatch(requests.children[1].textContent,/давность отчёта требует проверки/);
+ const focused=requests.children[1];focused.focus();ui.updateTasks(snapshot([],reports));assert.equal(doc.activeElement,focused);assert.match(root.querySelector('.ow-task-row').textContent,/последние данные/);assert.doesNotMatch(requests.children[1].textContent,/давность отчёта требует проверки/);
+});
+test('complete successful empty Home is affirmative while partial/failure/disconnected/unknown remain distinct',()=>{
+ const doc=D.document(),root=doc.createElement('div');doc.body.append(root);const ui=V.mount(root,{taskHome:T,now:()=>now});const empty=()=>root.querySelector('.ow-task-home').querySelector('.ow-empty').textContent;
+ assert.equal(empty(),'Текущая работа Cicada не проверена.');ui.updateTasks(snapshot([]));assert.equal(empty(),'Сейчас нет текущей работы в Cicada.');ui.updateTasks(snapshot([],[],{historyLimited:true}));assert.equal(empty(),'Список Cicada неполный.');ui.updateTasks(null,Error('synthetic'));assert.equal(empty(),'Текущая работа Cicada не проверена.');ui.updateTasks({cicada:{status:'disconnected'}});assert.equal(empty(),'Cicada не подключена.');
 });

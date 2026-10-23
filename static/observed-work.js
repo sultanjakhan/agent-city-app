@@ -147,7 +147,7 @@
   }
   function patch(){
    const r=model.route,d=model.data;for(const [k,n] of Object.entries(navButtons))n.setAttribute('aria-current',k===r.page?'page':'false');
-   const homeSource=r.page==='home'&&homeWidget?homeWidget.source():null;
+   const homeSource=r.page==='home'&&!r.sessionId&&homeWidget?homeWidget.source():null;
    put(freshBody,homeSource?homeSource.detail+' · Выполнения: '+d.source.status:d.source.message||'Охват определяется подключённым источником. Отсутствие сессии не подтверждает отсутствие работы вне него.');
    put(freshLabel,homeSource?homeSource.label:({fresh:'Источник доступен',partial:'Частичный снимок',stale:'Данные устарели',unavailable:'Источник недоступен',unknown:'Актуальность неизвестна'}[d.source.status])+(d.source.readAt?' · '+new Date(d.source.readAt).toLocaleTimeString('ru-RU'):''));
    put(heading,{home:homeWidget?'Главная':'Сейчас',projects:'Проекты',history:'История'}[r.page]);
