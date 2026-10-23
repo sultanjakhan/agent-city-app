@@ -206,6 +206,30 @@ class CicadaConnector:
             except Exception as exc:
                 return {"source": {"id": row["id"], "label": row["label"], "profile": row["profile"]}, "status": "error", "readAt": _now(), "tasks": [], "error": "Не удалось прочитать Cicada. Проверь источник в настройках."}
 
+    def read_observation_task(self, identity):
+        """Fresh personal task read for owner observations; no executor binding."""
+        from observation_store import validate_task, ObservationError
+        validate_task(identity)
+        with self._lock:
+            selected, _ = self._read_settings()
+            candidate = self._find(selected)
+            if candidate is None: raise ObservationError('observation_source_unavailable')
+            try: path = self._source_path(candidate)
+            except CicadaConnectorError: raise ObservationError('observation_source_unavailable') from None
+            source_key = hashlib.sha256(str(path).encode()).hexdigest()[:16]
+            if candidate['profile'] != identity['profile'] or source_key != identity['sourceKey']:
+                raise ObservationError('observation_source_mismatch')
+            try: tasks, _ = self._read_db(path, source_ids=[identity['sourceId']])
+            except (sqlite3.Error, OSError, CicadaConnectorError):
+                raise ObservationError('observation_source_unavailable') from None
+            task = next((t for t in tasks if t['sourceId'] == identity['sourceId'] and t['taskKey'] == identity['taskKey']), None)
+            if task is None: raise ObservationError('observation_task_unavailable')
+            tags = {tag.strip().lower() for tag in task['tags']}
+            if ('task-sphere:personal' not in tags or 'task-sphere:work' in tags or
+                    any(tag.startswith(('jira', 'investlink')) for tag in tags)):
+                raise ObservationError('observation_personal_task_required')
+            return task
+
     @staticmethod
     def exchange_identity(path):
         from work_exchange import validate_binding, strict_json, ExchangeError
@@ -298,6 +322,8 @@ class CicadaConnector:
                     except (ValueError, TypeError, AttributeError): pass
                 tags = str(tags or "")[:65536]
                 toks = [x.strip() for x in tags.split(",") if x.strip()]
+                personal_eligible = ('task-sphere:personal' in toks and not any(
+                    tok.lower() == 'task-sphere:work' or tok.lower().startswith(('jira', 'investlink')) for tok in toks))
                 def pref(prefix: str) -> str:
                     return next((x[len(prefix):] for x in toks if x.startswith(prefix)), "")
                 process = pref("task-process:") or ("system-analysis" if pref("task-stage:") or "task-waiting" in toks else "")
@@ -312,7 +338,7 @@ class CicadaConnector:
                 stage_label = stage_map.get(stage) or (_BUILTIN.get(stage) if process == "system-analysis" else None) or stage
                 for entry in history:
                     entry["stageLabel"] = stage_map.get(entry["stage"]) or (_BUILTIN.get(entry["stage"]) if process == "system-analysis" else None) or entry["stage"]
-                result.append({"taskKey": "cicada-" + hashlib.sha256(str(path).encode()).hexdigest()[:16] + "-" + str(ident), "sourceId": str(ident), "title": str(title or "")[:500], "date": date, "plannedTime": tm, "completed": bool(completed), "isActive": bool(active), "isPaused": bool(worked_today and not active and not hidden_paused), "actualMinutes": int(seconds or 0) // 60, "process": process, "processLabel": p.get("title") or ("Системный анализ" if process == "system-analysis" else process), "stage": stage, "stageLabel": stage_label, "projects": list(dict.fromkeys(x[8:] for x in toks if x.startswith("project:") and x[8:]))[:100], "tags": [x for x in toks if not x.startswith("task-stage-log:")][:200], "waiting": "task-waiting" in toks, "stageHistory": history[-200:], "lastUpdatedAt": updated})
+                result.append({"personalEligible": personal_eligible, "taskKey": "cicada-" + hashlib.sha256(str(path).encode()).hexdigest()[:16] + "-" + str(ident), "sourceId": str(ident), "title": str(title or "")[:500], "date": date, "plannedTime": tm, "completed": bool(completed), "isActive": bool(active), "isPaused": bool(worked_today and not active and not hidden_paused), "actualMinutes": int(seconds or 0) // 60, "process": process, "processLabel": p.get("title") or ("Системный анализ" if process == "system-analysis" else process), "stage": stage, "stageLabel": stage_label, "projects": list(dict.fromkeys(x[8:] for x in toks if x.startswith("project:") and x[8:]))[:100], "tags": [x for x in toks if not x.startswith("task-stage-log:")][:200], "waiting": "task-waiting" in toks, "stageHistory": history[-200:], "lastUpdatedAt": updated})
             return result[:500], len(result) > 500
         finally:
             con.close()

@@ -203,6 +203,7 @@ function drawRun(run,{inline=false}={}){
 }
 function renderDashboardRows(){
  if(!dashboardData)return;
+ renderImportedObservations(dashboardData.importedObservations);
  refreshDashboardFilters();syncDashboardTabs();
  const data=dashboardData.cicada,source=data.source;
  $('dashboard-source').textContent=source?t(data.status==='connected'?'{name} · прочитано {date}':'{name} · источник недоступен',{name:source.label,date:when(data.readAt)}):t('Cicada не подключена');

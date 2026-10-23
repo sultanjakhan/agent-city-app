@@ -54,6 +54,7 @@ from codex_controls import CodexControls, CodexControlsError, RevisionConflict a
 import sys
 from owner_session import OwnerSessions
 from run_store import PUBLIC_FIELDS, RunStore, RunError, RunConflict
+from observation_store import ObservationStore, ObservationError, ObservationConflict
 from task_sync import TaskSync
 from task_connection import TaskError
 from work_exchange import WorkExchange, ExchangeError, ExchangeConflict
@@ -372,6 +373,7 @@ class Store:
         self.runs = RunStore(self.directory)
         self.cicada = CicadaConnector(self.directory, candidates=cicada_candidates if cicada_candidates is not None else [] if skills_root else storage.cicada_candidates)
         self.work_exchange = WorkExchange(self.directory, self.cicada, self.runs)
+        self.observations = ObservationStore(self.directory, self.cicada)
         self.task_sync = TaskSync(self.directory)
         self.task_sync.start()
         self.cloud = LocalOnlyCloud() if self.local_only else CloudSync(self.directory, self.cloud_reports)
@@ -474,6 +476,7 @@ class Store:
         for row in runs:
             row['skills'] = [skills.get(ident, {'id': ident, 'name': row.get('skillNames', {}).get(ident, ident)}) for ident in row['skillIds']]
         return {'schemaVersion': 1, 'asOf': now(), 'cicada': source, 'runs': runs, 'workRegistry': registry,
+                'importedObservations': self.observations.projection(),
                 'telemetry': 'reported', 'notice': 'Tasks are read from Cicada. Model, token and skill fields require an explicit agent report. Missing data is not zero.'}
 
     def snapshot(self):
@@ -942,6 +945,7 @@ class Handler(BaseHTTPRequestHandler):
                  "/pipeline.js": ("pipeline.js", "text/javascript; charset=utf-8"),
                  "/work-registry.js": ("work-registry.js", "text/javascript; charset=utf-8"),
                  "/pipeline.css": ("pipeline.css", "text/css; charset=utf-8"),
+                 "/observations.js": ("observations.js", "text/javascript; charset=utf-8"),
                  "/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
                  "/shared-tasks.js": ("shared-tasks.js", "text/javascript; charset=utf-8"),
                  "/shared-tasks.css": ("shared-tasks.css", "text/css; charset=utf-8"),
@@ -994,7 +998,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             path = urlsplit(self.path).path
-            limit = 2 * 1024 * 1024 if path.startswith(('/api/skills/', '/api/projects/', '/api/extensions/', '/api/rules/', '/api/data-sources/', '/api/pipelines/', '/api/work-exchange/')) else 4096
+            limit = 2 * 1024 * 1024 if path.startswith(('/api/skills/', '/api/projects/', '/api/extensions/', '/api/rules/', '/api/data-sources/', '/api/pipelines/', '/api/work-exchange/', '/api/observations/')) else 4096
             if length < 1 or length > limit:
                 return self.respond(413, {"error": "Неверный размер запроса."})
             self.connection.settimeout(5)
@@ -1006,6 +1010,20 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond(401,{'error':'invalid_owner_delegation'})
                 self.owner_delegation_consumed=True
             path = urlsplit(self.path).path
+            if path.startswith('/api/observations/'):
+                if not self.csrf_authorized():
+                    return self.respond(403, {'error': 'invalid_application_token'})
+                try:
+                    if path == '/api/observations/preview' and set(payload) == {'document'}:
+                        result = self.server.store.observations.preview(payload['document'])
+                    elif path == '/api/observations/import' and set(payload) == {'previewToken', 'revision'}:
+                        result = self.server.store.observations.import_preview(payload['previewToken'], payload['revision'])
+                    else: raise ObservationError('unsupported_observation_request')
+                    return self.respond(200, result)
+                except ObservationConflict:
+                    return self.respond(409, {'error': 'observation_conflict'})
+                except (ValueError, OSError):
+                    return self.respond(400, {'error': 'invalid_observation_or_source'})
             if path.startswith('/api/work-exchange/'):
                 if not self.csrf_authorized():
                     return self.respond(403, {'error':'invalid_application_token'})
