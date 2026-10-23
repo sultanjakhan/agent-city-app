@@ -12,7 +12,9 @@
   const ui=view.mount(surface,{externalNavigation:true,onRoute:r=>{if(!routing)hostRoute(r);}});
   const nav=document.querySelector('.app-header nav'),historyButton=document.createElement('button');
   historyButton.type='button';historyButton.dataset.observedPage='history';historyButton.setAttribute('aria-label','История');historyButton.title='История';
-  const full=document.createElement('span');full.textContent='История';const small=document.createElement('small');small.className='compact-label';small.textContent='История';historyButton.append(full,small);
+  const full=document.createElement('span');full.textContent='История';const small=document.createElement('small');small.className='compact-label';small.textContent='История';const clock=document.createElementNS('http://www.w3.org/2000/svg','svg');clock.setAttribute('viewBox','0 0 24 24');clock.setAttribute('aria-hidden','true');clock.setAttribute('focusable','false');
+  const face=document.createElementNS('http://www.w3.org/2000/svg','circle');face.setAttribute('cx','12');face.setAttribute('cy','12');face.setAttribute('r','9');
+  const hands=document.createElementNS('http://www.w3.org/2000/svg','path');hands.setAttribute('d','M12 7v5l3 2');clock.append(face,hands);historyButton.append(clock,full,small);
   if(nav)nav.append(historyButton);historyButton.addEventListener('click',()=>{pending={page:'history'};hostRoute(pending);});
   function selectedNav(){
    for(const b of document.querySelectorAll('[data-view="dashboard"],[data-view="sessions"]')){

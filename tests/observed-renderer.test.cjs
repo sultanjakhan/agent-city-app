@@ -29,7 +29,7 @@ test('host reuses cached feed and existing visibility lifecycle without route re
  let visibility=0,reads=0;const listeners={};const win={LiveSessions:{viewChanged(){visibility++;},getSnapshot(){reads++;return {source:{status:'live'},projects:[{id:'project-a'}],agents:[],sessions:[]};},refresh:async()=>null,openProject(){},openSession(){}},addEventListener:(k,cb)=>listeners[k]=cb,removeEventListener:k=>delete listeners[k],renderDashboard(){throw Error('legacy dashboard must not render');}};
  win.render=()=>{win.LiveSessions.viewChanged(true,'dashboard');doc.getElementById('dashboard-view').hidden=false;win.renderDashboard();};win.setView=page=>{win.LiveSessions.viewChanged(true,page);};
  const adapter=H.install({document:doc,window:win,view:V,feed:F});win.render();assert.equal(doc.getElementById('dashboard-view').hidden,true);assert.equal(doc.getElementById('live-sessions-view').hidden,true);assert.equal(doc.getElementById('observed-work-view').hidden,false);
- const history=nav.children.find(n=>n.dataset.observedPage==='history');history.click();assert.equal(adapter.ui.model.route.page,'history');assert.ok(visibility<6);assert.equal(reads,1);
+ const history=nav.children.find(n=>n.dataset.observedPage==='history');assert.equal(history.getAttribute('aria-label'),'История');assert.equal(history.querySelector('svg').getAttribute('aria-hidden'),'true');assert.equal(history.querySelector('circle').getAttribute('r'),'9');assert.equal(history.querySelector('path').getAttribute('d'),'M12 7v5l3 2');history.click();assert.equal(adapter.ui.model.route.page,'history');assert.ok(visibility<6);assert.equal(reads,1);
  listeners['agentcity:live-summary']({detail:{source:{status:'unavailable'},sessions:[]}});assert.equal(adapter.ui.model.route.page,'history');assert.equal(adapter.ui.model.data.source.status,'unavailable');adapter.disconnect();
 });
 
@@ -49,7 +49,7 @@ test('session tabs support ArrowLeft/Right/Home/End, focus movement and polling 
 });
 test('History shows per-observation date, duration and session/execution scope without merging same-task rows',()=>{
  const h=setup();h.ui.update(feed([session('raw',{status:'completed',endedAt:'2026-01-01T10:01:00Z',durationMs:61000,usage:{total:500}}),session('bound',{status:'interrupted',scope:{kind:'turn',id:'exact-turn'},endedAt:'2026-01-01T11:01:00Z',usage:{total:null}})]));h.ui.navigate({page:'history'});
- const rows=h.root.querySelectorAll('.ow-session');assert.equal(rows.length,2);assert.match(rows[0].textContent,/За сессию.*2026.*1 мин 1 с/);assert.match(rows[1].textContent,/За выполнение.*2026.*Неизвестно/);rows[1].click();assert.match(by(h.root,'ow-metrics').textContent,/За выполнение/);
+ const rows=h.root.querySelectorAll('.ow-session');assert.equal(rows.length,2);assert.match(rows[1].textContent,/За сессию.*2026.*1 мин 1 с/);assert.match(rows[0].textContent,/За выполнение.*2026.*Неизвестно/);rows[0].click();assert.match(by(h.root,'ow-metrics').textContent,/За выполнение/);
 });
 
 test('actual assembled bundle boots once in passive host and never fetches a new asset or endpoint',()=>{
@@ -86,4 +86,32 @@ test('only explicit different-session selection focuses heading and reveals it w
  // A clipped native main scroll container also requires reveal even within viewport.
  h.root.clientHeight=100;h.root.scrollHeight=1200;h.root.getBoundingClientRect=()=>({top:0,bottom:100});rows[0].click();assert.equal(heading.scrollCalls.length,2);
  h.ui.update(feed([session('one',{status:'completed'}),session('two')]));assert.equal(heading.scrollCalls.length,2);assert.equal(heading.focusCalls.length,3);assert.equal(h.ui.model.route.sessionId,'one');
+});
+
+
+test('same-name sessions identify supplied agents in Home and History while bound task title stays primary',()=>{
+ const h=setup(),agents=[{id:'agent-a',projectId:'project-a',name:'Агент Альфа'},{id:'agent-b',projectId:'project-a',name:'Агент Бета'}];
+ h.ui.update({...feed([session('a',{name:'Session 1'}),session('b',{name:'Session 1',agentId:'agent-b'}),session('linked',{name:'Session 1',scope:{kind:'turn',id:'exact'},task:{title:'Исходная задача'}})]),agents});
+ let rows=h.root.querySelectorAll('.ow-session');assert.match(rows[0].textContent,/Агент Альфа · Session 1/);assert.match(rows[1].textContent,/Агент Бета · Session 1/);assert.equal(rows[2].querySelector('.ow-session-title').textContent,'Исходная задача');assert.match(rows[2].textContent,/Агент Альфа/);
+ h.ui.update({...feed([session('a',{name:'Session 1',status:'completed'}),session('b',{name:'Session 1',agentId:'agent-b',status:'completed'})]),agents});h.ui.navigate({page:'history'});rows=h.root.querySelectorAll('.ow-session');assert.match(rows[0].textContent,/Агент Альфа · Session 1/);assert.match(rows[1].textContent,/Агент Бета · Session 1/);
+});
+test('History starts newest ended first with deterministic ID ties and retains keyed focus/scroll on updates',()=>{
+ const h=setup(),old=session('old',{status:'completed',endedAt:'2026-01-01T10:00:00Z'}),a=session('new-a',{status:'completed',endedAt:'2026-01-01T11:00:00Z'}),b=session('new-b',{status:'completed',endedAt:'2026-01-01T12:00:00+01:00'}),unknown=session('unknown',{status:'interrupted'});
+ h.ui.update(feed([old,b,unknown,a]));h.ui.navigate({page:'history'});const list=by(h.root,'ow-rows');assert.deepEqual(list.children.map(n=>n.dataset.key),['new-a','new-b','old','unknown']);
+ const prior=list.children[2];prior.focus();h.root.scrollTop=430;
+ h.ui.update(feed([unknown,old,a,b,session('middle',{status:'completed',endedAt:'2026-01-01T10:30:00Z'})]));assert.deepEqual(list.children.map(n=>n.dataset.key),['new-a','new-b','middle','old','unknown']);assert.equal(list.children[3],prior);assert.equal(h.doc.activeElement,prior);assert.equal(h.root.scrollTop,430);assert.equal(prior.scrollCalls,undefined);
+});
+test('narrow master/detail back restores list filters, position and row focus only on explicit return',()=>{
+ const h=setup();h.doc.defaultView.innerWidth=600;const data=feed([session('one',{status:'completed'}),session('two',{status:'completed'})]);h.ui.update(data);h.ui.navigate({page:'history',projectId:'project-a',agentId:'agent-a'});
+ const selected=by(h.root,'ow-session'),layout=by(h.root,'ow-layout');h.root.scrollTop=640;selected.click();assert.equal(layout.className.includes('ow-detail-selected'),true);assert.equal(by(h.root,'ow-back').textContent,'Назад к списку');
+ h.root.scrollTop=20;const tab=by(h.root,'ow-tabs').children[1];tab.click();tab.focus();h.ui.update(data);assert.equal(h.doc.activeElement,tab);assert.equal(h.root.scrollTop,20);assert.equal(h.ui.model.route.sessionId,'one');
+ by(h.root,'ow-back').click();assert.deepEqual(h.ui.model.route,{page:'history',projectId:'project-a',agentId:'agent-a',sessionId:null});assert.equal(h.doc.activeElement,selected);assert.equal(h.root.scrollTop,640);assert.equal(layout.className.includes('ow-detail-selected'),false);
+ const css=require('node:fs').readFileSync(require('node:path').join(__dirname,'../static/observed-work.css'),'utf8');assert.match(css,/@media\(max-width:800px\)[^}]*} \.ow-layout\.ow-detail-selected>\.ow-main \{ display:none;/);
+ selected.click();assert.equal(by(h.root,'ow-tabs').children[1].getAttribute('aria-selected'),'true');
+});
+test('return after selected execution completes retains Home rather than navigating to History',()=>{
+ const h=setup();h.ui.update(feed([session('one')]));h.root.scrollTop=110;by(h.root,'ow-session').click();h.ui.update(feed([session('one',{status:'completed'})]));assert.equal(h.ui.model.route.sessionId,'one');by(h.root,'ow-back').click();assert.equal(h.ui.model.route.page,'home');assert.equal(h.ui.model.route.sessionId,null);assert.equal(h.doc.activeElement,by(h.root,'ow-main').querySelector('h2'));assert.equal(h.root.scrollTop,110);
+});
+test('Projects landing uses the single project-selection instruction',()=>{
+ const h=setup();h.ui.navigate({page:'projects'});for(const status of ['partial','fresh','unavailable']){h.ui.update({...feed([]),source:{status}});assert.equal(by(h.root,'ow-empty').textContent,'Выберите проект.');}
 });

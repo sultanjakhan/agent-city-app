@@ -45,13 +45,13 @@
 .ow-events li { display:grid; grid-template-columns:110px minmax(0,1fr); gap:12px; padding:10px 0; border-bottom:1px solid var(--subtle,#ebebeb); }
 .ow-events time { color:var(--secondary,#606060); font-variant-numeric:tabular-nums; }
 .ow-events span,.ow-detail p { overflow-wrap:anywhere; }
-@media(max-width:800px) { .ow-layout.ow-detail-selected { grid-template-columns:minmax(0,1fr); } .ow-detail { border-top:1px solid var(--line,#dedede); padding-top:20px; } }
+@media(max-width:800px) { .ow-layout.ow-detail-selected { grid-template-columns:minmax(0,1fr); } .ow-layout.ow-detail-selected>.ow-main { display:none; } .ow-detail { border-top:1px solid var(--line,#dedede); padding-top:20px; } }
 @media(max-width:480px) { .ow-metrics { grid-template-columns:minmax(0,1fr); gap:12px; } .ow-metrics>div { display:grid; grid-template-columns:80px minmax(0,1fr); gap:4px 12px; } .ow-metrics dd { margin:0; } .ow-metrics p { grid-column:2; } .ow-session { grid-template-columns:minmax(0,1fr); } .ow-events li { grid-template-columns:90px minmax(0,1fr); gap:8px; } }
-.app-header [data-observed-page] { min-height:42px; padding:10px 12px; border:0; border-radius:5px; background:transparent; color:var(--secondary,#606060); text-align:left; }
+.app-header [data-observed-page] { display:flex; align-items:center; gap:11px; min-height:42px; padding:10px 12px; border:0; border-radius:5px; background:transparent; color:var(--secondary,#606060); text-align:left; }
 .app-header [data-observed-page][aria-current=page] { color:var(--ink,#252525); font-weight:650; background:var(--soft,#f7f7f7); }
 .app-header [data-observed-page] .compact-label { display:none; }
 body.nav-collapsed .app-header [data-observed-page]>span { display:none; }
-body.nav-collapsed .app-header [data-observed-page] { padding:8px 0; text-align:center; }
+body.nav-collapsed .app-header [data-observed-page] { flex-direction:column; align-items:center; gap:4px; padding:8px 0; text-align:center; }
 body.nav-collapsed .app-header [data-observed-page] .compact-label { display:block; }
 
 .ow-token-facts { grid-template-columns:minmax(100px,1fr) minmax(0,2fr); gap:8px 12px; }

@@ -45,7 +45,7 @@
    navigate(value){current=route(value);return {...current};},get route(){return {...current};},get data(){return data;},
    get selected(){return data.sessions.find(s=>s.id===current.sessionId)||null;},
    rows(page=current.page){return data.sessions.filter(s=>(page==='home'?LIVE.has(s.status):page==='history'?DONE.has(s.status):!DONE.has(s.status))&&
-    (page!=='projects'||!!current.projectId)&&(!current.projectId||s.projectId===current.projectId)&&(!current.agentId||s.agentId===current.agentId)).sort((a,b)=>order.get(a.id)-order.get(b.id));},
+    (page!=='projects'||!!current.projectId)&&(!current.projectId||s.projectId===current.projectId)&&(!current.agentId||s.agentId===current.agentId)).sort((a,b)=>{if(page!=='history')return order.get(a.id)-order.get(b.id);const stamp=s=>{const value=Date.parse(s.endedAt||'');return Number.isFinite(value)?value:-Infinity;},left=stamp(a),right=stamp(b);return left===right?(a.id<b.id?-1:a.id>b.id?1:0):left>right?-1:1;});},
    projectAgents(projectId){return data.agents.filter(a=>a.projectId===projectId).map(a=>({...a,currentCount:data.sessions.filter(s=>s.projectId===projectId&&s.agentId===a.id&&LIVE.has(s.status)).length})).filter(a=>a.currentCount>0).sort((a,b)=>a.id.localeCompare(b.id));},
    projectEdges(projectId){const ids=new Set(this.projectAgents(projectId).map(a=>a.id));return data.edges.filter(e=>e.projectId===projectId&&ids.has(e.fromAgentId)&&ids.has(e.toAgentId)).sort((a,b)=>a.id.localeCompare(b.id));}};
  }
@@ -98,16 +98,28 @@
   });
   function patchTabs(){activityPanel.hidden=tab!=='activity';taskPanel.hidden=tab!=='task';for(const [key,n] of Object.entries(tabButtons)){n.setAttribute('aria-selected',String(key===tab));n.tabIndex=key===tab?0:-1;}}
   function remember(){if(selectedId)sessionState.set(selectedId,{tab,usage:usage.node.open,identity:identity.node.open,diagnostics:diagnostics.node.open});}
-  const detailsBody=node('div');detailsBody.append(detailTitle,detailStatus,summary,start,usage.node,skillArea,tabs,activityPanel,taskPanel,diagnostics.node);detail.append(crumb,unavailable,detailsBody);layout.append(main,detail);shell.append(nav,fresh,layout);container.append(shell);
-  detailTitle.tabIndex=-1;
-  function navigate(r){
-   const previous=model.route.sessionId;remember();model.navigate(r);patch();onRoute(model.route);
-   if(!r.sessionId||r.sessionId===previous||model.selected?.id!==r.sessionId)return;
-   detailTitle.focus({preventScroll:true});
-   const rect=detailTitle.getBoundingClientRect(),viewport=doc.defaultView?.innerHeight||doc.documentElement.clientHeight;
+  let listReturn=null;const back=button('Назад к списку',returnToList,'ow-button ow-back');
+  const detailsBody=node('div');detailsBody.append(detailTitle,detailStatus,summary,start,usage.node,skillArea,tabs,activityPanel,taskPanel,diagnostics.node);detail.append(back,crumb,unavailable,detailsBody);layout.append(main,detail);shell.append(nav,fresh,layout);container.append(shell);
+  detailTitle.tabIndex=-1;heading.tabIndex=-1;
+  function positions(){const saved=[];for(let n=rows;n;n=n.parentElement)saved.push([n,n.scrollTop,n.scrollLeft]);return saved;}
+  function reveal(target){
+   target.focus({preventScroll:true});
+   const rect=target.getBoundingClientRect(),viewport=doc.defaultView?.innerHeight||doc.documentElement.clientHeight;
    let top=0,bottom=viewport;
-   for(let n=detailTitle.parentElement;n;n=n.parentElement)if(n.clientHeight>0&&n.scrollHeight>n.clientHeight){const bounds=n.getBoundingClientRect();top=Math.max(top,bounds.top);bottom=Math.min(bottom,bounds.bottom);}
-   if(rect.top<top||rect.bottom>bottom)detailTitle.scrollIntoView({block:'start',inline:'nearest',behavior:'auto'});
+   for(let n=target.parentElement;n;n=n.parentElement)if(n.clientHeight>0&&n.scrollHeight>n.clientHeight){const bounds=n.getBoundingClientRect();top=Math.max(top,bounds.top);bottom=Math.min(bottom,bounds.bottom);}
+   if(rect.top<top||rect.bottom>bottom)target.scrollIntoView({block:'start',inline:'nearest',behavior:'auto'});
+  }
+  function returnToList(){
+   const saved=listReturn||{route:{...model.route,sessionId:null},selectedId:model.route.sessionId,positions:[]};
+   navigate(saved.route);
+   for(const [n,top,left] of saved.positions){n.scrollTop=top;n.scrollLeft=left;}
+   reveal(rows._rows?.get(saved.selectedId)||heading);
+  }
+  function navigate(r){
+   const previous=model.route.sessionId,destination=route(r),different=destination.sessionId&&destination.sessionId!==previous;
+   if(different)listReturn={route:{...destination,sessionId:null},selectedId:destination.sessionId,positions:positions()};
+   remember();model.navigate(destination);patch();onRoute(model.route);
+   if(different&&model.selected?.id===destination.sessionId)reveal(detailTitle);
   }
   function facts(parent,values){list(parent,values,x=>x[0],()=>{const n=node('div'),k=node('dt'),v=node('dd');n.append(k,v);n._k=k;n._v=v;return n;},(n,[k,v])=>{put(n._k,k);put(n._v,v??'Неизвестно');});}
   function eventRows(parent,items){list(parent,items,x=>x.id,()=>{const n=node('li'),at=node('time'),label=node('span');n.append(at,label);n._at=at;n._label=label;return n;},(n,e)=>{put(n._at,e.at?new Date(e.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'Время неизвестно');if(e.at)n._at.setAttribute('datetime',e.at);else n._at.removeAttribute('datetime');put(n._label,e.label);});}
@@ -139,8 +151,8 @@
    list(filter,[{id:'',name:r.page==='projects'?'Выберите проект':'Все проекты'},...d.projects],x=>x.id,()=>node('option'),(n,p)=>{n.value=p.id;put(n,p.name);});filter.value=r.projectId||'';filter.hidden=r.page==='home';projectArea.hidden=r.page!=='projects';
    const active=model.projectAgents(r.projectId);list(agents,r.page==='projects'?active:[],x=>x.id,a=>button('',()=>navigate({page:'projects',projectId:a.projectId,agentId:a.id}),'ow-agent'),(n,a)=>put(n,a.name+' · '+a.currentCount));
    list(edges,r.page==='projects'?model.projectEdges(r.projectId):[],x=>x.id,()=>node('li'),(n,e)=>{const names=k=>d.agents.find(a=>a.id===k)?.name||k;put(n,names(e.fromAgentId)+' → '+names(e.toAgentId)+' · '+e.label);});projectHistory.hidden=!r.projectId;
-   const sessions=model.rows();list(rows,sessions,x=>x.id,s=>{const n=button('',()=>navigate({...model.route,sessionId:s.id}),'ow-session'),title=node('span','ow-session-title'),status=node('span','ow-status'),scope=node('span','ow-secondary');n.append(title,status,scope);n._title=title;n._status=status;n._scope=scope;return n;},(n,s)=>{put(n._title,s.task?.title||s.name);put(n._status,executionLabel(s));const scopeLabel=s.scope.kind==='turn'?'За выполнение':s.scope.kind==='session'?'За сессию':'За интервал';const date=s.endedAt?new Date(s.endedAt).toLocaleString('ru-RU',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'Дата неизвестна';put(n._scope,(d.projects.find(p=>p.id===s.projectId)?.name||'Проект неизвестен')+' · '+(r.page==='history'?scopeLabel+' · '+date+' · '+duration(timing(s,now()).value)+' · ':'')+number(s.usage.total)+' токенов');n.setAttribute('aria-pressed',String(s.id===r.sessionId));});
-   put(empty,['unavailable','unknown'].includes(d.source.status)?'Текущий список не подтверждён источником.':r.page==='home'?'Текущие исполнения не наблюдаются.':r.page==='history'?'Завершённые исполнения не наблюдаются.':'Выберите проект или наблюдаемую сессию.');empty.hidden=sessions.length>0;patchDetail();
+   const sessions=model.rows();list(rows,sessions,x=>x.id,s=>{const n=button('',()=>navigate({...model.route,sessionId:s.id}),'ow-session'),title=node('span','ow-session-title'),status=node('span','ow-status'),scope=node('span','ow-secondary');n.append(title,status,scope);n._title=title;n._status=status;n._scope=scope;return n;},(n,s)=>{const agentName=d.agents.find(a=>a.id===s.agentId&&a.projectId===s.projectId)?.name||'Агент неизвестен';put(n._title,s.task?.title||agentName+' · '+s.name);n.title=s.id;put(n._status,executionLabel(s));const scopeLabel=s.scope.kind==='turn'?'За выполнение':s.scope.kind==='session'?'За сессию':'За интервал';const date=s.endedAt?new Date(s.endedAt).toLocaleString('ru-RU',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'Дата неизвестна';put(n._scope,(d.projects.find(p=>p.id===s.projectId)?.name||'Проект неизвестен')+' · '+(s.task?.title?agentName+' · ':'')+(r.page==='history'?scopeLabel+' · '+date+' · '+duration(timing(s,now()).value)+' · ':'')+number(s.usage.total)+' токенов');n.setAttribute('aria-pressed',String(s.id===r.sessionId));});
+   put(empty,r.page==='projects'&&!r.projectId?'Выберите проект.':['unavailable','unknown'].includes(d.source.status)?'Текущий список не подтверждён источником.':r.page==='home'?'Текущие исполнения не наблюдаются.':r.page==='history'?'Завершённые исполнения не наблюдаются.':'Выберите проект или наблюдаемую сессию.');empty.hidden=sessions.length>0;patchDetail();
   }
   patch();return {model,update(feed){remember();model.update(feed);patch();},navigate,destroy(){shell.remove();},element:shell};
  }

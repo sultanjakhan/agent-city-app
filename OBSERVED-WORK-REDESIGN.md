@@ -70,6 +70,14 @@ its details show unavailable without silently selecting another row. Explicit
 user navigation may change the selection. The host continues its existing polling
 cadence; this component introduces no second loop.
 
+At narrow widths below 800px, a selected detail replaces the list. The explicit
+«Назад к списку» action retains page/project/agent filters, restores the saved
+list position and focuses/reveals the selected row (or the list heading if that
+row is no longer listed). Desktop retains the split view. Feed updates never
+trigger this return path. Raw rows show the supplied agent with session name;
+bound task titles remain primary. History sorts by ended timestamp descending,
+then exact observation ID, with unknown dates last; keyed nodes stay intact.
+
 ## Private compatibility assembly and install boundary
 
 Original installed files were approved only for private compatibility inspection,
